@@ -1270,10 +1270,9 @@ static void handle_ipfrag(sdwan_client_t *c, const uint8_t *pkt, int pktlen)
     for (int i = 0; i < FRAG_SLOTS; i++) {
         if (!c->frags[i].in_use || c->frags[i].id != frag_id) continue;
 
-        /* Check timeout */
+        /* Check timeout — free slot and let new-slot allocation pick it up */
         if (now - c->frags[i].timestamp >= FRAG_TIMEOUT) {
             c->frags[i].in_use = 0;
-            found = 1;
             break;
         }
 
@@ -1301,7 +1300,7 @@ static void handle_ipfrag(sdwan_client_t *c, const uint8_t *pkt, int pktlen)
 
         if (eop) {
             /* Reassembly complete — decrypt if needed and write to TUN */
-            if (pkt[0] == PKT_DATA_ENC)
+            if (c->encrypt)
                 xor_encrypt(c->xor_key, g_frag_content, total_len);
             write(c->tun_fd, g_frag_content, total_len);
             c->tun_tx++;
@@ -1433,47 +1432,44 @@ static void handle_segrt(sdwan_client_t *c, const uint8_t *pkt, int pktlen)
 
     if (inner_len <= 0) return;
 
-    /* Check if inner packet is IPFRAG (type 0x22 in SR context) */
-    if (inner[0] == 0x22) {
-        /* Pass inner packet directly to IPFRAG handler */
-        handle_ipfrag(c, inner, inner_len);
-        return;
-    }
-
-    /* Otherwise: treat as DATA, optionally decrypt */
+    /* SR AES decrypt the entire inner payload BEFORE type dispatch.
+     * This covers both DATA and IPFRAG inner packets. */
     uint8_t decrypt_buf[MAX_PKT_SIZE];
     if (inner_len > (int)sizeof(decrypt_buf)) return;
+    memcpy(decrypt_buf, inner, inner_len);
 
-    /* Validate inner_len has room for inner header */
-    if (inner_len <= HDR_SIZE) return;
-
-    const uint8_t *data_start = inner + HDR_SIZE; /* skip inner sdwan header */
-    int data_len = inner_len - HDR_SIZE;
-    memcpy(decrypt_buf, data_start, data_len);
-
-    /* SR decrypt FIRST (AES layer), then XOR.
-     * Wire order is: plaintext → XOR → AES → send
-     * So receive must be: AES⁻¹ → strip pad → XOR⁻¹ */
     if (g_cfg.sr_count > 0 && g_cfg.sr_encrypt_mode > 0) {
         uint8_t encrypt_algo = base[2] & 0x7;
         if (encrypt_algo == g_cfg.sr_encrypt_mode) {
-            if (sr_decrypt(c, decrypt_buf, data_len, base) < 0)
+            if (sr_decrypt(c, decrypt_buf, inner_len, base) < 0)
                 return; /* drop packet if decryption fails */
-            /* Remove padding */
+            /* Remove padding from the end */
             uint8_t padlen = (base[2] >> 3) & 0x1f;
-            if (padlen > 0 && padlen < data_len)
-                data_len -= padlen;
+            if (padlen > 0 && padlen < inner_len)
+                inner_len -= padlen;
         } else if (encrypt_algo != 0) {
             return; /* algorithm mismatch — drop rather than forward ciphertext */
         }
     }
 
+    /* Now dispatch based on decrypted inner packet type */
+    if (decrypt_buf[0] == 0x22) {
+        /* IPFRAG in SR context — pass decrypted inner to handler */
+        handle_ipfrag(c, decrypt_buf, inner_len);
+        return;
+    }
+
+    /* DATA: skip inner sdwan header */
+    if (inner_len <= HDR_SIZE) return;
+    uint8_t *data_start = decrypt_buf + HDR_SIZE;
+    int data_len = inner_len - HDR_SIZE;
+
     /* Apply XOR decryption AFTER AES if inner packet is DATA_ENC */
-    if (inner[0] == PKT_DATA_ENC)
-        xor_encrypt(c->xor_key, decrypt_buf, data_len);
+    if (decrypt_buf[0] == PKT_DATA_ENC)
+        xor_encrypt(c->xor_key, data_start, data_len);
 
     /* Write decrypted data to TUN */
-    write(c->tun_fd, decrypt_buf, data_len);
+    write(c->tun_fd, data_start, data_len);
     c->tun_tx++;
 }
 

@@ -1232,8 +1232,10 @@ static void handle_ipfrag(sdwan_client_t *c, const uint8_t *pkt, int pktlen)
     memcpy(&frag_id, ethpkt + 8, 4);
 
     /* Parse bitfield at ethpkt[12:16] (little-endian uint32) */
-    uint32_t bf;
-    memcpy(&bf, ethpkt + 12, 4);
+    uint32_t bf = ((uint32_t)ethpkt[12])       |
+                  ((uint32_t)ethpkt[13] << 8)  |
+                  ((uint32_t)ethpkt[14] << 16) |
+                  ((uint32_t)ethpkt[15] << 24);
     int eop     = bf & 0x1;
     int fragoff = (bf >> 2) & 0x1fff;
     int fraglen = (bf >> 15) & 0x7ff;

@@ -42,18 +42,27 @@ encrypt=0        # 0=off, 1=XOR encryption
 
 ## OpenWrt Deployment
 
+### Option A: Build with OpenWrt SDK
+
 ```bash
-# Copy binary
+# In the OpenWrt SDK directory
+git clone https://github.com/Ricky-Hao/iwand.git /tmp/iwand
+cp -r /tmp/iwand/openwrt/package package/iwand
+make package/iwand/compile V=s
+```
+
+The `.ipk` will be in `bin/packages/`. Install with `opkg install iwand_*.ipk`.
+
+### Option B: Manual binary install
+
+Download a pre-built binary from [Releases](https://github.com/Ricky-Hao/iwand/releases) or build from source:
+
+```bash
 scp iwand root@router:/usr/sbin/
-
-# Copy init script
 scp openwrt/iwand.init root@router:/etc/init.d/iwand
-
-# Copy and edit config
 scp openwrt/iwan.conf.example root@router:/etc/sdwan/iwan.conf
+ssh root@router chmod 755 /etc/init.d/iwand
 ssh root@router vi /etc/sdwan/iwan.conf
-
-# Enable and start
 ssh root@router /etc/init.d/iwand enable
 ssh root@router /etc/init.d/iwand start
 ```

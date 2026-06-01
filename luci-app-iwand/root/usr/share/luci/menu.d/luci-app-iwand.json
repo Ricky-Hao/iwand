@@ -1,0 +1,14 @@
+{
+	"admin/vpn/iwand": {
+		"title": "iWAN SD-WAN",
+		"order": 80,
+		"action": {
+			"type": "view",
+			"path": "iwand"
+		},
+		"depends": {
+			"acl": [ "luci-app-iwand" ],
+			"uci": { "iwand": true }
+		}
+	}
+}

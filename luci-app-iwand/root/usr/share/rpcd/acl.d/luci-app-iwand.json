@@ -1,0 +1,21 @@
+{
+	"luci-app-iwand": {
+		"description": "Grant access to iWAN SD-WAN configuration",
+		"read": {
+			"uci": [ "iwand" ],
+			"ubus": {
+				"service": [ "list" ],
+				"file": [ "exec", "read" ]
+			},
+			"file": {
+				"/var/run/iwand/*": [ "read" ]
+			}
+		},
+		"write": {
+			"uci": [ "iwand" ],
+			"ubus": {
+				"service": [ "signal" ]
+			}
+		}
+	}
+}

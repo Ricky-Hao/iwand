@@ -16,7 +16,8 @@ function getServiceStatus() {
 	return callServiceList('iwand').then(function (res) {
 		var running = false;
 		try {
-			running = res.iwand.instances.instance1.running;
+			var instances = res.iwand.instances || {};
+			running = Object.values(instances).some(function (i) { return i.running; });
 		} catch (e) {}
 		return running;
 	}).catch(function () {

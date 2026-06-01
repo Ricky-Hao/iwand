@@ -58,6 +58,7 @@ define Package/iwand/install
 	$(INSTALL_DIR) $(1)/etc/sdwan
 	[ -f $(1)/etc/sdwan/iwan.conf ] || \
 		$(INSTALL_CONF) $(PKG_BUILD_DIR)/openwrt/iwan.conf.example $(1)/etc/sdwan/iwan.conf
+	chmod 0600 $(1)/etc/sdwan/iwan.conf
 endef
 
 $(eval $(call BuildPackage,iwand))

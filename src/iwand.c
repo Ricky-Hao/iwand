@@ -1262,9 +1262,7 @@ static void handle_ipfrag(sdwan_client_t *c, const uint8_t *pkt, int pktlen)
 
     const uint8_t *frag_data = pkt + HDR_SIZE + ETHPKT_SIZE;
 
-    struct timeval tv;
-    gettimeofday(&tv, NULL);
-    uint32_t now = (uint32_t)tv.tv_sec;
+    uint32_t now = mono_secs();
 
     /* Search for existing slot with matching id */
     int found = 0;
@@ -1311,6 +1309,7 @@ static void handle_ipfrag(sdwan_client_t *c, const uint8_t *pkt, int pktlen)
             if (total_len <= FRAG_BUF_SIZE) {
                 memcpy(c->frags[i].buf, g_frag_content, total_len);
                 c->frags[i].len = total_len;
+                c->frags[i].timestamp = now; /* refresh deadline on progress */
             } else {
                 /* Accumulated data exceeds slot buffer — drop reassembly */
                 c->frags[i].in_use = 0;

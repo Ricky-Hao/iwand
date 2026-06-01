@@ -8,77 +8,105 @@ on:
 jobs:
   build-ipk:
     runs-on: ubuntu-latest
+    needs: []
     strategy:
       fail-fast: false
       matrix:
         include:
-          - target: x86/64
-            arch: x86_64
-            sdk: openwrt-sdk-25.12.4-x86-64_gcc-14.3.0_musl.Linux-x86_64
-          - target: armsr/armv8
-            arch: aarch64
-            sdk: openwrt-sdk-25.12.4-armsr-armv8_gcc-14.3.0_musl.Linux-x86_64
-          - target: mediatek/filogic
-            arch: aarch64_cortex-a53
-            sdk: openwrt-sdk-25.12.4-mediatek-filogic_gcc-14.3.0_musl.Linux-x86_64
-          - target: ramips/mt7621
-            arch: mipsel_24kc
-            sdk: openwrt-sdk-25.12.4-ramips-mt7621_gcc-14.3.0_musl.Linux-x86_64
+          - bin_arch: x86_64
+            openwrt_archs: "x86_64"
+          - bin_arch: aarch64
+            openwrt_archs: "aarch64_cortex-a53 aarch64_cortex-a72 aarch64_cortex-a76 aarch64_generic"
+          - bin_arch: armv7
+            openwrt_archs: "arm_cortex-a5_vfpv4 arm_cortex-a7_neon-vfpv4 arm_cortex-a7_vfpv4 arm_cortex-a8_vfpv3 arm_cortex-a9_neon arm_cortex-a9_vfpv3-d16 arm_cortex-a15_neon-vfpv4"
+          - bin_arch: mipsel
+            openwrt_archs: "mipsel_24kc mipsel_74kc mipsel_mips32"
+          - bin_arch: mips
+            openwrt_archs: "mips_24kc mips_4kec mips_mips32"
 
     steps:
       - uses: actions/checkout@v4
 
-      - name: Install dependencies
+      - name: Get version
+        id: version
+        run: |
+          if [[ "$GITHUB_REF" == refs/tags/v* ]]; then
+            echo "version=${GITHUB_REF#refs/tags/v}" >> "$GITHUB_OUTPUT"
+          else
+            echo "version=0.0.0-dev" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Download binary from build workflow
+        uses: actions/download-artifact@v4
+        with:
+          name: iwand-${{ matrix.bin_arch }}
+          path: dist
+        continue-on-error: true
+
+      - name: Build binary if artifact not available
+        if: steps.download-binary.outcome == 'failure' || !hashFiles('dist/iwand')
         run: |
           sudo apt-get update -qq
-          sudo apt-get install -y -qq build-essential gawk unzip file \
-            libncurses-dev python3-distutils zstd
+          case "${{ matrix.bin_arch }}" in
+            x86_64)   sudo apt-get install -y -qq musl-tools
+                      CC=musl-gcc make static ;;
+            aarch64)  sudo apt-get install -y -qq gcc-aarch64-linux-gnu
+                      CC=aarch64-linux-gnu-gcc STRIP=aarch64-linux-gnu-strip CFLAGS="-O2 -Wall" LDFLAGS="-static" make all
+                      aarch64-linux-gnu-strip iwand ;;
+            armv7)    sudo apt-get install -y -qq gcc-arm-linux-gnueabihf
+                      CC=arm-linux-gnueabihf-gcc STRIP=arm-linux-gnueabihf-strip CFLAGS="-O2 -Wall" LDFLAGS="-static" make all
+                      arm-linux-gnueabihf-strip iwand ;;
+            mipsel)   sudo apt-get install -y -qq gcc-mipsel-linux-gnu
+                      CC=mipsel-linux-gnu-gcc STRIP=mipsel-linux-gnu-strip CFLAGS="-O2 -Wall" LDFLAGS="-static" make all
+                      mipsel-linux-gnu-strip iwand ;;
+            mips)     sudo apt-get install -y -qq gcc-mips-linux-gnu
+                      CC=mips-linux-gnu-gcc STRIP=mips-linux-gnu-strip CFLAGS="-O2 -Wall" LDFLAGS="-static" make all
+                      mips-linux-gnu-strip iwand ;;
+          esac
+          mkdir -p dist
+          cp iwand dist/
 
-      - name: Cache SDK
-        id: cache-sdk
-        uses: actions/cache@v4
-        with:
-          path: sdk
-          key: openwrt-sdk-${{ matrix.sdk }}
+      - name: Install fpm
+        run: sudo gem install fpm
 
-      - name: Download OpenWrt SDK
-        if: steps.cache-sdk.outputs.cache-hit != 'true'
+      - name: Build base deb
         run: |
-          TARGET_PATH=$(echo "${{ matrix.target }}" | tr '/' '-')
-          URL="https://downloads.openwrt.org/releases/25.12.4/targets/${{ matrix.target }}/${{ matrix.sdk }}.tar.zst"
-          echo "Downloading $URL"
-          curl -fSL "$URL" -o sdk.tar.zst
-          mkdir sdk
-          tar --zstd -xf sdk.tar.zst -C sdk --strip-components=1
-          rm sdk.tar.zst
+          chmod 755 dist/iwand
+          chmod 755 openwrt/iwand.init
+          chmod 755 luci-app-iwand/root/etc/init.d/iwand
+          fpm -t deb -s dir \
+            --name iwand \
+            --version "${{ steps.version.outputs.version }}" \
+            --category net \
+            --license MIT \
+            --description "Panabit iWAN SD-WAN client daemon" \
+            --url "https://github.com/Ricky-Hao/iwand" \
+            --maintainer "Ricky-Hao <14084342+Ricky-Hao@users.noreply.github.com>" \
+            --architecture all \
+            --no-deb-generate-changes \
+            --depends kmod-tun \
+            --config-files /etc/sdwan/iwan.conf \
+            -p dist/iwand.deb \
+            dist/iwand=/usr/sbin/iwand \
+            luci-app-iwand/root/etc/init.d/iwand=/etc/init.d/iwand \
+            openwrt/iwan.conf.example=/etc/sdwan/iwan.conf \
+            luci-app-iwand/root/etc/config/iwand=/etc/config/iwand \
+            luci-app-iwand/htdocs/luci-static/resources/view/iwand.js=/www/luci-static/resources/view/iwand.js \
+            luci-app-iwand/root/usr/share/luci/menu.d/luci-app-iwand.json=/usr/share/luci/menu.d/luci-app-iwand.json \
+            luci-app-iwand/root/usr/share/rpcd/acl.d/luci-app-iwand.json=/usr/share/rpcd/acl.d/luci-app-iwand.json
 
-      - name: Build iwand package
-        run: |
-          cd sdk
-          cp -r "$GITHUB_WORKSPACE/openwrt/package" package/iwand
-          make defconfig
-          make package/iwand/compile V=s -j$(nproc)
-
-      - name: Build luci-app-iwand package
-        run: |
-          cd sdk
-          ./scripts/feeds update -a
-          cp -r "$GITHUB_WORKSPACE/luci-app-iwand" package/luci-app-iwand
-          make package/luci-app-iwand/compile V=s -j$(nproc) || true
-
-      - name: Collect packages
+      - name: Convert to OpenWrt ipk
         run: |
           mkdir -p output
-          find sdk/bin -name 'iwand*.ipk' -o -name 'luci-app-iwand*.ipk' | while read f; do
-            base=$(basename "$f" .ipk)
-            cp "$f" "output/${base}_${{ matrix.arch }}.ipk"
+          for arch in ${{ matrix.openwrt_archs }}; do
+            .github/scripts/deb2ipk.sh "$arch" dist/iwand.deb "output/iwand_${{ steps.version.outputs.version }}_${arch}.ipk"
           done
           ls -lh output/
 
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: ipk-${{ matrix.arch }}
+          name: ipk-${{ matrix.bin_arch }}
           path: output/*.ipk
 
   release:

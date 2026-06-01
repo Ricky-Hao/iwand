@@ -352,7 +352,10 @@ static const uint8_t aes_inv_sbox[256] = {
 
 static void aes_set_decrypt_key(const uint8_t key[16], aes_key_t *aeskey)
 {
-    /* Generate encrypt schedule first, then derive decrypt schedule */
+    /* Generate encrypt schedule first, then reverse round key order.
+     * aes_decrypt_block() uses the direct inverse cipher
+     * (InvShiftRows→InvSubBytes→AddRoundKey→InvMixColumns),
+     * which requires plain-swapped round keys without further transform. */
     aes_set_encrypt_key(key, aeskey);
     uint32_t *rk = aeskey->rd_key;
     /* Swap round keys: round 0 <-> round 10, 1 <-> 9, 2 <-> 8, 3 <-> 7, 4 <-> 6 */
@@ -361,38 +364,6 @@ static void aes_set_decrypt_key(const uint8_t key[16], aes_key_t *aeskey)
             uint32_t t = rk[i*4+j];
             rk[i*4+j] = rk[(10-i)*4+j];
             rk[(10-i)*4+j] = t;
-        }
-    }
-    /* Apply InvMixColumns to rounds 1-9 */
-    for (int r = 1; r <= 9; r++) {
-        for (int j = 0; j < 4; j++) {
-            uint32_t w = rk[r*4+j];
-            /* Extract bytes */
-            uint8_t b[4];
-            b[0] = (w >> 24) & 0xff;
-            b[1] = (w >> 16) & 0xff;
-            b[2] = (w >>  8) & 0xff;
-            b[3] = (w      ) & 0xff;
-            /* InvMixColumns on each column */
-            #define xtime(x) (((x)<<1) ^ ((((x)>>7)&1)*0x1b))
-            #define mul2(x) xtime(x)
-            #define mul3(x) (xtime(x)^(x))
-            #define mul9(x) (xtime(xtime(xtime(x)))^(x))
-            #define mul11(x) (xtime(xtime(xtime(x))^(x))^(x))
-            #define mul13(x) (xtime(xtime(xtime(x)^(x)))^(x))
-            #define mul14(x) (xtime(xtime(xtime(x)^(x))^(x)))
-            uint8_t r0 = mul14(b[0])^mul11(b[1])^mul13(b[2])^mul9(b[3]);
-            uint8_t r1 = mul9(b[0])^mul14(b[1])^mul11(b[2])^mul13(b[3]);
-            uint8_t r2 = mul13(b[0])^mul9(b[1])^mul14(b[2])^mul11(b[3]);
-            uint8_t r3 = mul11(b[0])^mul13(b[1])^mul9(b[2])^mul14(b[3]);
-            rk[r*4+j] = ((uint32_t)r0<<24)|((uint32_t)r1<<16)|((uint32_t)r2<<8)|r3;
-            #undef xtime
-            #undef mul2
-            #undef mul3
-            #undef mul9
-            #undef mul11
-            #undef mul13
-            #undef mul14
         }
     }
 }
@@ -936,7 +907,7 @@ static void sr_setup_keys(sdwan_client_t *c)
 
 static void sr_decrypt(sdwan_client_t *c, uint8_t *data, int len, const uint8_t *srhdr)
 {
-    int block_size = ((srhdr[3] & 0x7) == 1) ? 16 : 32;
+    int block_size = ((srhdr[2] & 0x7) == 1) ? 16 : 32;
 
     /* Only decrypt if length is block-aligned */
     if (len % block_size != 0) return;
@@ -1092,15 +1063,16 @@ static void run_script(const char *script, const char *event, sdwan_client_t *c)
     if (access(script, X_OK) != 0) return;
 
     char ip_str[16], dns0_str[16], dns1_str[16], mtu_str[8];
-    uint32_t ip_h = ntohl(c->peer_ip);
-    uint32_t dns0_h = ntohl(c->dns0);
-    uint32_t dns1_h = ntohl(c->dns1);
+    /* peer_ip/dns are stored as host-order big-endian integers from TLV parsing */
     snprintf(ip_str, sizeof(ip_str), "%u.%u.%u.%u",
-             (ip_h>>24)&0xff, (ip_h>>16)&0xff, (ip_h>>8)&0xff, ip_h&0xff);
+             (c->peer_ip>>24)&0xff, (c->peer_ip>>16)&0xff,
+             (c->peer_ip>>8)&0xff, c->peer_ip&0xff);
     snprintf(dns0_str, sizeof(dns0_str), "%u.%u.%u.%u",
-             (dns0_h>>24)&0xff, (dns0_h>>16)&0xff, (dns0_h>>8)&0xff, dns0_h&0xff);
+             (c->dns0>>24)&0xff, (c->dns0>>16)&0xff,
+             (c->dns0>>8)&0xff, c->dns0&0xff);
     snprintf(dns1_str, sizeof(dns1_str), "%u.%u.%u.%u",
-             (dns1_h>>24)&0xff, (dns1_h>>16)&0xff, (dns1_h>>8)&0xff, dns1_h&0xff);
+             (c->dns1>>24)&0xff, (c->dns1>>16)&0xff,
+             (c->dns1>>8)&0xff, c->dns1&0xff);
     snprintf(mtu_str, sizeof(mtu_str), "%d",
              c->server_mtu > 0 ? c->server_mtu : g_cfg.mtu);
 
@@ -1601,6 +1573,10 @@ static void client_reset(sdwan_client_t *c)
     c->peer_ip = 0;
     c->dns0 = 0;
     c->dns1 = 0;
+
+    /* Clear fragment reassembly slots */
+    for (int i = 0; i < FRAG_SLOTS; i++)
+        c->frags[i].in_use = 0;
     c->server_mtu = 0;
     c->encrypt = 0;
     c->peer_dup_pkt = 0;

@@ -1,4 +1,5 @@
 CC       ?= gcc
+STRIP    ?= strip
 CFLAGS   ?= -O2 -Wall -Wextra -Wno-unused-parameter
 LDFLAGS  ?=
 TARGET   = iwand
@@ -12,8 +13,8 @@ $(TARGET): $(SRC)
 	$(CC) $(CFLAGS) -o $@ $^ $(LDFLAGS)
 
 static: $(SRC)
-	$(CC) $(CFLAGS) -static -fno-link-libatomic -o $(TARGET) $^ $(LDFLAGS)
-	@which strip >/dev/null 2>&1 && strip $(TARGET) || true
+	$(CC) $(CFLAGS) -static -o $(TARGET) $^ $(LDFLAGS)
+	@which $(STRIP) >/dev/null 2>&1 && $(STRIP) $(TARGET) || strip $(TARGET) 2>/dev/null || true
 
 clean:
 	rm -f $(TARGET)

@@ -1,0 +1,77 @@
+name: Build
+
+on:
+  push:
+    branches: [main]
+    tags: ['v*']
+  pull_request:
+    branches: [main]
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        include:
+          - arch: x86_64
+            musl_target: x86_64-linux-musl
+          - arch: aarch64
+            musl_target: aarch64-linux-musl
+          - arch: armv7l
+            musl_target: armv7l-linux-musleabihf
+          - arch: mipsel
+            musl_target: mipsel-linux-musl
+          - arch: mips
+            musl_target: mips-linux-musl
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download musl cross-compiler
+        run: |
+          TOOLCHAIN="${{ matrix.musl_target }}-cross"
+          curl -fsSL "https://musl.cc/${TOOLCHAIN}.tgz" -o toolchain.tgz
+          tar xzf toolchain.tgz
+          echo "$PWD/${TOOLCHAIN}/bin" >> $GITHUB_PATH
+
+      - name: Build
+        run: |
+          CC="${{ matrix.musl_target }}-gcc" \
+          STRIP="${{ matrix.musl_target }}-strip" \
+          CFLAGS="-O2 -Wall -Wextra -Wno-unused-parameter" \
+          make static
+          file iwand
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: iwand-${{ matrix.arch }}
+          path: iwand
+
+  release:
+    needs: build
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+
+      - name: Prepare release binaries
+        run: |
+          mkdir release
+          for dir in artifacts/iwand-*; do
+            arch=$(basename "$dir" | sed 's/iwand-//')
+            cp "$dir/iwand" "release/iwand-${arch}"
+          done
+          ls -lh release/
+
+      - name: Create release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: release/*
+          generate_release_notes: true

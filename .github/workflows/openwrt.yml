@@ -36,6 +36,7 @@ jobs:
           fi
 
       - name: Download binary from build workflow
+        id: download-binary
         uses: actions/download-artifact@v4
         with:
           name: iwand-${{ matrix.bin_arch }}

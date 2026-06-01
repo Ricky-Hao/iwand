@@ -470,6 +470,13 @@ static int cfg_load(const char *path)
     char line[256];
     while (fgets(line, sizeof(line), fp)) {
         int len = strlen(line);
+        /* Skip overlong lines: if no newline and not EOF, discard remainder */
+        if (len > 0 && line[len-1] != '\n' && !feof(fp)) {
+            int ch;
+            while ((ch = fgetc(fp)) != EOF && ch != '\n')
+                ;
+            continue;
+        }
         if (len == 0 || line[0] == '#' || line[0] == '\r' || line[0] == '\n')
             continue;
         /* strip trailing CR/LF */
@@ -689,7 +696,9 @@ static int tun_set_ip(const char *dev, uint32_t ip, uint32_t mask)
         return -1;
     }
 
-    ifr.ifr_flags = IFF_UP | IFF_RUNNING | IFF_POINTOPOINT;
+    /* Read existing flags and add IFF_UP */
+    ioctl(sockfd, SIOCGIFFLAGS, &ifr);
+    ifr.ifr_flags |= IFF_UP | IFF_RUNNING;
     if (ioctl(sockfd, SIOCSIFFLAGS, &ifr) < 0) {
         log_msg("SIOCSIFFLAGS UP failed: %s\n", strerror(errno));
         close(sockfd);
@@ -1174,13 +1183,17 @@ static int handle_openack(sdwan_client_t *c, const uint8_t *pkt, int pktlen)
 
     /* Apply network configuration */
     uint16_t eff_mtu = g_cfg.mtu;
-    if (c->server_mtu > 0 && c->server_mtu < eff_mtu)
+    if (c->server_mtu >= 68 && c->server_mtu < eff_mtu)
         eff_mtu = c->server_mtu;
 
-    /* Set TUN IP and MTU */
+    /* Set TUN IP and MTU — fail and reset if interface setup fails */
     uint32_t mask = htonl(0xffffff00); /* 255.255.255.0 */
-    tun_set_ip(g_cfg.tun_name, htonl(c->peer_ip), mask);
-    tun_set_mtu(g_cfg.tun_name, eff_mtu);
+    if (tun_set_ip(g_cfg.tun_name, htonl(c->peer_ip), mask) < 0 ||
+        tun_set_mtu(g_cfg.tun_name, eff_mtu) < 0) {
+        log_msg("OPENACK: TUN interface setup failed, resetting\n");
+        c->state = STATE_CLOSED;
+        return 0;
+    }
 
     char ip_str[16];
     snprintf(ip_str, sizeof(ip_str), "%u.%u.%u.%u",

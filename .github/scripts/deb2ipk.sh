@@ -24,7 +24,8 @@ sed -i "s/Architecture: .*/Architecture: $ARCH/" control
 tar czf ../control.tar.gz ./*
 popd > /dev/null
 
-tar czf "package.ipk" control.tar.gz data.tar.gz debian-binary
+# Repack as IPK (gzipped tar, OpenWrt format: debian-binary first, with ./ prefix)
+(cd "$TMP_DIR" && tar --format=gnu -czf "package.ipk" ./debian-binary ./data.tar.gz ./control.tar.gz)
 popd > /dev/null
 
 cp "$TMP_DIR/package.ipk" "$OUT_FILE"

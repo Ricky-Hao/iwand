@@ -17,5 +17,5 @@ encrypt=0
 # srencryptmode=1
 
 # Optional: hook scripts (called with: event tun_name ip mtu dns0 dns1)
-# up_script=/etc/sdwan/up.sh
-# down_script=/etc/sdwan/down.sh
+# up_script=/etc/iwan/up.sh
+# down_script=/etc/iwan/down.sh

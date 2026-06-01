@@ -22,9 +22,9 @@ clean:
 install: $(TARGET)
 	install -d $(DESTDIR)/usr/sbin
 	install -m 0755 $(TARGET) $(DESTDIR)/usr/sbin/
-	install -d $(DESTDIR)/etc/sdwan
-	@if [ ! -f $(DESTDIR)/etc/sdwan/iwan.conf ]; then \
-		install -m 0600 openwrt/iwan.conf.example $(DESTDIR)/etc/sdwan/iwan.conf; \
+	install -d $(DESTDIR)/etc/iwan
+	@if [ ! -f $(DESTDIR)/etc/iwan/iwan.conf ]; then \
+		install -m 0600 openwrt/iwan.conf.example $(DESTDIR)/etc/iwan/iwan.conf; \
 	fi
 	install -d $(DESTDIR)/etc/init.d
 	install -m 0755 openwrt/iwand.init $(DESTDIR)/etc/init.d/iwand

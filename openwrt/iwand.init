@@ -6,7 +6,7 @@ STOP=10
 USE_PROCD=1
 
 PROG=/usr/sbin/iwand
-CONF=/etc/sdwan/iwan.conf
+CONF=/etc/iwan/iwan.conf
 
 start_service() {
     [ -f "$CONF" ] || {

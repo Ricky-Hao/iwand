@@ -15,7 +15,7 @@ CC=musl-gcc make static     # static musl build (for OpenWrt)
 
 ```
 iwand [options]
-  -f <file>   config file path [default: /etc/sdwan/iwan.conf]
+  -f <file>   config file path [default: /etc/iwan/iwan.conf]
   -l <file>   log to file instead of syslog
   -F           run in foreground (log to stderr)
   -v           print version
@@ -60,9 +60,9 @@ Download a pre-built binary from [Releases](https://github.com/Ricky-Hao/iwand/r
 ```bash
 scp iwand root@router:/usr/sbin/
 scp openwrt/iwand.init root@router:/etc/init.d/iwand
-scp openwrt/iwan.conf.example root@router:/etc/sdwan/iwan.conf
+scp openwrt/iwan.conf.example root@router:/etc/iwan/iwan.conf
 ssh root@router chmod 755 /etc/init.d/iwand
-ssh root@router vi /etc/sdwan/iwan.conf
+ssh root@router vi /etc/iwan/iwan.conf
 ssh root@router /etc/init.d/iwand enable
 ssh root@router /etc/init.d/iwand start
 ```

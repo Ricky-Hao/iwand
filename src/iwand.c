@@ -1778,7 +1778,7 @@ static void daemonize(void)
  *  Usage / Version
  * ────────────────────────────────────────────────────────── */
 
-static const char *default_cfg = "/etc/sdwan/iwan.conf";
+static const char *default_cfg = "/etc/iwan/iwan.conf";
 static const char *default_log = "";
 
 static void usage(const char *prog)

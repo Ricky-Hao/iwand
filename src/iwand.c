@@ -931,12 +931,12 @@ static void sr_setup_keys(sdwan_client_t *c)
     aes_set_encrypt_key(keybuf, &c->sr_encrypt_key);
 }
 
-static void sr_decrypt(sdwan_client_t *c, uint8_t *data, int len, const uint8_t *srhdr)
+static int sr_decrypt(sdwan_client_t *c, uint8_t *data, int len, const uint8_t *srhdr)
 {
     int block_size = ((srhdr[2] & 0x7) == 1) ? 16 : 32;
 
     /* Only decrypt if length is block-aligned */
-    if (len % block_size != 0) return;
+    if (len % block_size != 0) return -1;
 
     /* Decrypt in-place, block by block */
     for (int off = 0; off < len; off += block_size) {
@@ -946,8 +946,8 @@ static void sr_decrypt(sdwan_client_t *c, uint8_t *data, int len, const uint8_t 
             aes_decrypt_block(data + off, tmp, &c->sr_decrypt_key);
             memcpy(data + off, tmp, 16);
         }
-        /* AES-256 would need 2 blocks or a 256-bit implementation — not common */
     }
+    return 0;
 }
 
 
@@ -1456,7 +1456,8 @@ static void handle_segrt(sdwan_client_t *c, const uint8_t *pkt, int pktlen)
     if (g_cfg.sr_count > 0 && g_cfg.sr_encrypt_mode > 0) {
         uint8_t encrypt_algo = base[2] & 0x7;
         if (encrypt_algo == g_cfg.sr_encrypt_mode) {
-            sr_decrypt(c, decrypt_buf, data_len, base);
+            if (sr_decrypt(c, decrypt_buf, data_len, base) < 0)
+                return; /* drop packet if decryption fails */
             /* Remove padding */
             uint8_t padlen = (base[2] >> 3) & 0x1f;
             if (padlen > 0 && padlen < data_len)

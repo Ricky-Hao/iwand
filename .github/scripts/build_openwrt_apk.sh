@@ -55,7 +55,7 @@ install -Dm755 "$PROJECT/luci-app-iwand/root/etc/init.d/iwand" "$ROOT_DIR/etc/in
 
 # Config files
 install -Dm600 "$PROJECT/openwrt/iwan.conf.example" "$ROOT_DIR/etc/sdwan/iwan.conf"
-install -Dm644 "$PROJECT/luci-app-iwand/root/etc/config/iwand" "$ROOT_DIR/etc/config/iwand"
+install -Dm600 "$PROJECT/luci-app-iwand/root/etc/config/iwand" "$ROOT_DIR/etc/config/iwand"
 
 # LuCI files
 install -Dm644 "$PROJECT/luci-app-iwand/htdocs/luci-static/resources/view/iwand.js" \

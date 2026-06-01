@@ -52,7 +52,8 @@ define Package/iwand/install
 	$(INSTALL_BIN) $(PKG_BUILD_DIR)/luci-app-iwand/root/etc/init.d/iwand $(1)/etc/init.d/iwand
 
 	$(INSTALL_DIR) $(1)/etc/config
-	$(CP) $(PKG_BUILD_DIR)/luci-app-iwand/root/etc/config/iwand $(1)/etc/config/iwand
+	$(INSTALL_CONF) $(PKG_BUILD_DIR)/luci-app-iwand/root/etc/config/iwand $(1)/etc/config/iwand
+	chmod 0600 $(1)/etc/config/iwand
 
 	$(INSTALL_DIR) $(1)/etc/sdwan
 	[ -f $(1)/etc/sdwan/iwan.conf ] || \

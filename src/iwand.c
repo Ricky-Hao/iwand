@@ -520,11 +520,13 @@ static int cfg_load(const char *path)
             g_cfg.encrypt = (val[0] == '1') ? 1 : 0;
         else if (strcmp(key, "pipeid") == 0) {
             unsigned long v = strtoul(val, NULL, 10);
-            if (v <= 65535) g_cfg.pipeid = (uint16_t)v;
+            if (v <= 32767) g_cfg.pipeid = (uint16_t)v;
+            else log_msg("config warning: pipeid %lu exceeds wire limit 32767\n", v);
         }
         else if (strcmp(key, "pipeidx") == 0) {
             unsigned long v = strtoul(val, NULL, 10);
-            if (v <= 65535) g_cfg.pipeidx = (uint16_t)v;
+            if (v <= 1) g_cfg.pipeidx = (uint16_t)v;
+            else log_msg("config warning: pipeidx %lu exceeds wire limit 1\n", v);
         }
         else if (strcmp(key, "srlinks") == 0) {
             /* Parse comma-separated IP list: "1.2.3.4,5.6.7.8" or numeric */
@@ -633,7 +635,7 @@ static void log_msg(const char *fmt, ...)
 static void log_init(const char *path)
 {
     if (path && path[0]) {
-        g_logfp = fopen(path, "a");
+        g_logfp = fopen(path, "ae"); /* "e" sets O_CLOEXEC */
         if (!g_logfp)
             fprintf(stderr, "warning: cannot open log file %s\n", path);
     } else if (!g_foreground) {

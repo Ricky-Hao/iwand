@@ -86,6 +86,7 @@ jobs:
             --maintainer "Ricky-Hao <14084342+Ricky-Hao@users.noreply.github.com>" \
             --architecture all \
             --no-deb-generate-changes \
+            --deb-compression gz \
             --depends kmod-tun \
             --config-files /etc/sdwan/iwan.conf \
             -p dist/iwand.deb \

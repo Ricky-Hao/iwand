@@ -93,23 +93,19 @@ return view.extend({
 		o = s.option(form.Value, 'pipeid', _('Pipe ID'));
 		o.datatype = 'uinteger';
 		o.optional = true;
-		o.modalonly = true;
 
 		o = s.option(form.Value, 'pipeidx', _('Pipe Index'));
 		o.datatype = 'uinteger';
 		o.optional = true;
-		o.modalonly = true;
 
 		/* Segment routing */
 		o = s.option(form.Value, 'srlinks', _('SR Links'),
 			_('Comma-separated list of SR link addresses.'));
 		o.optional = true;
-		o.modalonly = true;
 
 		o = s.option(form.Value, 'srpassword', _('SR Password'));
 		o.password = true;
 		o.optional = true;
-		o.modalonly = true;
 
 		o = s.option(form.ListValue, 'srencryptmode', _('SR Encrypt Mode'));
 		o.value('0', _('Disabled'));
@@ -117,7 +113,6 @@ return view.extend({
 		o.value('2', _('AES-256'));
 		o.default = '0';
 		o.optional = true;
-		o.modalonly = true;
 
 		/* Status polling */
 		poll.add(function () {

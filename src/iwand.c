@@ -655,7 +655,7 @@ static void log_deinit(void)
 
 static int tun_open(const char *dev)
 {
-    int fd = open("/dev/net/tun", O_RDWR);
+    int fd = open("/dev/net/tun", O_RDWR | O_CLOEXEC);
     if (fd < 0) {
         log_msg("open /dev/net/tun failed: %s\n", strerror(errno));
         return -1;
@@ -674,7 +674,7 @@ static int tun_open(const char *dev)
 
 static int tun_set_ip(const char *dev, uint32_t ip, uint32_t mask)
 {
-    int sockfd = socket(AF_INET, SOCK_DGRAM, 0);
+    int sockfd = socket(AF_INET, SOCK_DGRAM | SOCK_CLOEXEC, 0);
     if (sockfd < 0) return -1;
     struct ifreq ifr;
     memset(&ifr, 0, sizeof(ifr));
@@ -711,7 +711,7 @@ static int tun_set_ip(const char *dev, uint32_t ip, uint32_t mask)
 
 static int tun_set_mtu(const char *dev, int mtu)
 {
-    int sockfd = socket(AF_INET, SOCK_DGRAM, 0);
+    int sockfd = socket(AF_INET, SOCK_DGRAM | SOCK_CLOEXEC, 0);
     if (sockfd < 0) return -1;
     struct ifreq ifr;
     memset(&ifr, 0, sizeof(ifr));
@@ -726,7 +726,7 @@ static int tun_set_mtu(const char *dev, int mtu)
 
 static void tun_clear_ip(const char *dev)
 {
-    int sockfd = socket(AF_INET, SOCK_DGRAM, 0);
+    int sockfd = socket(AF_INET, SOCK_DGRAM | SOCK_CLOEXEC, 0);
     if (sockfd < 0) return;
     struct ifreq ifr;
     memset(&ifr, 0, sizeof(ifr));
@@ -753,7 +753,7 @@ static void tun_clear_ip(const char *dev)
 
 static int udp_socket_create(void)
 {
-    int fd = socket(AF_INET, SOCK_DGRAM, 0);
+    int fd = socket(AF_INET, SOCK_DGRAM | SOCK_CLOEXEC, 0);
     if (fd < 0) return -1;
     int optval = 1;
     setsockopt(fd, SOL_SOCKET, SO_REUSEADDR, &optval, sizeof(optval));

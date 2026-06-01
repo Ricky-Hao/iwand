@@ -18,16 +18,20 @@ fi
 
 PROJECT=$(cd "$(dirname "$0")/../.."; pwd)
 
-# Convert version to APK format:
-#   0.0.0-dev       -> 0.0.0_dev-r0
+# Convert version to APK format. APK only allows specific suffixes:
+#   _alpha, _beta, _pre, _rc, _p (plus _cvs, _svn, _git, _hg)
+# Examples:
+#   0.0.0-dev       -> 0.0.0_pre0-r0
 #   1.13.0-beta.8   -> 1.13.0_beta8-r0
 #   1.13.0-rc.3     -> 1.13.0_rc3-r0
 #   1.13.0          -> 1.13.0-r0
 APK_VERSION="${VERSION#v}"
 # Handle suffixes like -beta.8, -rc.3 (with dot+number)
 APK_VERSION=$(echo "$APK_VERSION" | sed -E 's/-([a-z]+)\.([0-9]+)/_\1\2/')
-# Handle simple suffixes like -dev, -alpha, -beta (without number)
-APK_VERSION=$(echo "$APK_VERSION" | sed -E 's/-([a-z]+)$/_\1/')
+# Map -dev to _pre0 (APK doesn't recognize _dev)
+APK_VERSION=$(echo "$APK_VERSION" | sed -E 's/-dev$/_pre0/')
+# Handle other simple suffixes like -alpha, -beta, -rc (without number)
+APK_VERSION=$(echo "$APK_VERSION" | sed -E 's/-(alpha|beta|pre|rc)$/_\10/')
 APK_VERSION="${APK_VERSION}-r0"
 
 # apk mkpkg resolves owner/group through --root/etc/{passwd,group}

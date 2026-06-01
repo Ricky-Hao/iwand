@@ -27,15 +27,32 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - name: Cache musl cross-compiler
+        id: cache-toolchain
+        uses: actions/cache@v4
+        with:
+          path: ${{ matrix.musl_target }}-cross
+          key: musl-${{ matrix.musl_target }}-cross
+
       - name: Download musl cross-compiler
+        if: steps.cache-toolchain.outputs.cache-hit != 'true'
         run: |
           TOOLCHAIN="${{ matrix.musl_target }}-cross"
-          curl -fsSL "https://musl.cc/${TOOLCHAIN}.tgz" -o toolchain.tgz
-          tar xzf toolchain.tgz
-          echo "$PWD/${TOOLCHAIN}/bin" >> $GITHUB_PATH
+          for url in \
+            "https://more.musl.cc/11/x86_64-linux-musl/${TOOLCHAIN}.tgz" \
+            "https://musl.cc/${TOOLCHAIN}.tgz"; do
+            echo "Trying $url ..."
+            if curl -fsSL --connect-timeout 30 --max-time 300 "$url" -o toolchain.tgz; then
+              tar xzf toolchain.tgz
+              rm toolchain.tgz
+              break
+            fi
+          done
+          test -d "${TOOLCHAIN}" || { echo "Failed to download toolchain"; exit 1; }
 
       - name: Build
         run: |
+          export PATH="$PWD/${{ matrix.musl_target }}-cross/bin:$PATH"
           CC="${{ matrix.musl_target }}-gcc" \
           STRIP="${{ matrix.musl_target }}-strip" \
           CFLAGS="-O2 -Wall -Wextra -Wno-unused-parameter" \

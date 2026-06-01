@@ -1346,16 +1346,16 @@ static int handle_ipfrag(sdwan_client_t *c, const uint8_t *pkt, int pktlen)
  *  Protocol: handle incoming packets
  * ────────────────────────────────────────────────────────── */
 
-static void handle_data(sdwan_client_t *c, const uint8_t *pkt, int pktlen)
+static int handle_data(sdwan_client_t *c, const uint8_t *pkt, int pktlen)
 {
-    if (c->state != STATE_ESTABLISHED) return;
-    if (pktlen <= HDR_SIZE) return;
+    if (c->state != STATE_ESTABLISHED) return 0;
+    if (pktlen <= HDR_SIZE) return 0;
 
     const uint8_t *payload = pkt + HDR_SIZE;
     int payload_len = pktlen - HDR_SIZE;
 
     uint8_t decrypted[MAX_PKT_SIZE];
-    if (payload_len > (int)sizeof(decrypted)) return;
+    if (payload_len > (int)sizeof(decrypted)) return 0;
     memcpy(decrypted, payload, payload_len);
 
     /* Decrypt if encrypted packet (original checks packet type only) */
@@ -1366,6 +1366,7 @@ static void handle_data(sdwan_client_t *c, const uint8_t *pkt, int pktlen)
     /* Write to TUN */
     int n = write(c->tun_fd, decrypted, payload_len);
     if (n > 0) c->tun_tx++;
+    return 1;
 }
 
 static int handle_echo_resp(sdwan_client_t *c, const uint8_t *pkt, int pktlen)
@@ -1456,9 +1457,12 @@ static int handle_segrt(sdwan_client_t *c, const uint8_t *pkt, int pktlen)
     /* Now dispatch based on decrypted inner packet type */
     if (decrypt_buf[0] == PKT_IPFRAG_SR) {
         /* IPFRAG in SR context — pass decrypted inner to handler */
-        handle_ipfrag(c, decrypt_buf, inner_len);
-        return 1;
+        return handle_ipfrag(c, decrypt_buf, inner_len);
     }
+
+    /* Only accept DATA and DATA_ENC inner types */
+    if (decrypt_buf[0] != PKT_DATA && decrypt_buf[0] != PKT_DATA_ENC)
+        return 0;
 
     /* DATA: skip inner sdwan header */
     if (inner_len <= HDR_SIZE) return 0;
@@ -1485,8 +1489,8 @@ static void handle_recv(sdwan_client_t *c, const uint8_t *pkt, int pktlen)
     /* DATA packets — original binary does NOT validate session on DATA,
      * only checks source IP:port (already done by caller). */
     if (pkt_type == PKT_DATA || pkt_type == PKT_DATA_ENC) {
-        c->last_recv_time = mono_secs();
-        handle_data(c, pkt, pktlen);
+        if (handle_data(c, pkt, pktlen))
+            c->last_recv_time = mono_secs();
         return;
     }
 

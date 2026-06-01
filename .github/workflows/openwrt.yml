@@ -1,0 +1,106 @@
+name: OpenWrt Packages
+
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+
+jobs:
+  build-ipk:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: x86/64
+            arch: x86_64
+            sdk: openwrt-sdk-25.12.4-x86-64_gcc-14.3.0_musl.Linux-x86_64
+          - target: armsr/armv8
+            arch: aarch64
+            sdk: openwrt-sdk-25.12.4-armsr-armv8_gcc-14.3.0_musl.Linux-x86_64
+          - target: mediatek/filogic
+            arch: aarch64_cortex-a53
+            sdk: openwrt-sdk-25.12.4-mediatek-filogic_gcc-14.3.0_musl.Linux-x86_64
+          - target: ramips/mt7621
+            arch: mipsel_24kc
+            sdk: openwrt-sdk-25.12.4-ramips-mt7621_gcc-14.3.0_musl.Linux-x86_64
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq build-essential gawk unzip file \
+            libncurses-dev python3-distutils zstd
+
+      - name: Cache SDK
+        id: cache-sdk
+        uses: actions/cache@v4
+        with:
+          path: sdk
+          key: openwrt-sdk-${{ matrix.sdk }}
+
+      - name: Download OpenWrt SDK
+        if: steps.cache-sdk.outputs.cache-hit != 'true'
+        run: |
+          TARGET_PATH=$(echo "${{ matrix.target }}" | tr '/' '-')
+          URL="https://downloads.openwrt.org/releases/25.12.4/targets/${{ matrix.target }}/${{ matrix.sdk }}.tar.zst"
+          echo "Downloading $URL"
+          curl -fSL "$URL" -o sdk.tar.zst
+          mkdir sdk
+          tar --zstd -xf sdk.tar.zst -C sdk --strip-components=1
+          rm sdk.tar.zst
+
+      - name: Build iwand package
+        run: |
+          cd sdk
+          cp -r "$GITHUB_WORKSPACE/openwrt/package" package/iwand
+          make defconfig
+          make package/iwand/compile V=s -j$(nproc)
+
+      - name: Build luci-app-iwand package
+        run: |
+          cd sdk
+          ./scripts/feeds update -a
+          cp -r "$GITHUB_WORKSPACE/luci-app-iwand" package/luci-app-iwand
+          make package/luci-app-iwand/compile V=s -j$(nproc) || true
+
+      - name: Collect packages
+        run: |
+          mkdir -p output
+          find sdk/bin -name 'iwand*.ipk' -o -name 'luci-app-iwand*.ipk' | while read f; do
+            base=$(basename "$f" .ipk)
+            cp "$f" "output/${base}_${{ matrix.arch }}.ipk"
+          done
+          ls -lh output/
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: ipk-${{ matrix.arch }}
+          path: output/*.ipk
+
+  release:
+    needs: build-ipk
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+
+      - name: Collect IPKs
+        run: |
+          mkdir release
+          find artifacts -name '*.ipk' -exec cp {} release/ \;
+          ls -lh release/
+
+      - name: Upload to release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: release/*.ipk

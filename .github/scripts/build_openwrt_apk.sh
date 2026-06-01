@@ -1,0 +1,94 @@
+#!/usr/bin/env bash
+# Build an OpenWrt APK package for iwand.
+# Usage: build_openwrt_apk.sh <architecture> <version> <binary_path> <output_path>
+#
+# Requires: apk (apk-tools-static from Alpine)
+
+set -euo pipefail
+
+ARCHITECTURE="$1"
+VERSION="$2"
+BINARY_PATH="$3"
+OUTPUT_PATH="$4"
+
+if [ -z "$ARCHITECTURE" ] || [ -z "$VERSION" ] || [ -z "$BINARY_PATH" ] || [ -z "$OUTPUT_PATH" ]; then
+  echo "Usage: $0 <architecture> <version> <binary_path> <output_path>"
+  exit 1
+fi
+
+PROJECT=$(cd "$(dirname "$0")/../.."; pwd)
+
+# Convert version to APK format: strip leading v, append -r0
+APK_VERSION="${VERSION#v}"
+APK_VERSION=$(echo "$APK_VERSION" | sed -E 's/-([a-z]+)\.([0-9]+)/_\1\2/')
+APK_VERSION="${APK_VERSION}-r0"
+
+# apk mkpkg resolves owner/group through --root/etc/{passwd,group}
+APK_ROOT_DIR=$(mktemp -d)
+mkdir -p "$APK_ROOT_DIR/etc"
+cat > "$APK_ROOT_DIR/etc/passwd" <<EOF
+root:x:$(id -u):$(id -g):root:/root:/sbin/nologin
+EOF
+cat > "$APK_ROOT_DIR/etc/group" <<EOF
+root:x:$(id -g):root
+EOF
+
+ROOT_DIR=$(mktemp -d)
+trap 'rm -rf "$ROOT_DIR" "$APK_ROOT_DIR"' EXIT
+
+# Binary
+install -Dm755 "$BINARY_PATH" "$ROOT_DIR/usr/sbin/iwand"
+
+# Init script (UCI-aware)
+install -Dm755 "$PROJECT/luci-app-iwand/root/etc/init.d/iwand" "$ROOT_DIR/etc/init.d/iwand"
+
+# Config files
+install -Dm644 "$PROJECT/openwrt/iwan.conf.example" "$ROOT_DIR/etc/sdwan/iwan.conf"
+install -Dm644 "$PROJECT/luci-app-iwand/root/etc/config/iwand" "$ROOT_DIR/etc/config/iwand"
+
+# LuCI files
+install -Dm644 "$PROJECT/luci-app-iwand/htdocs/luci-static/resources/view/iwand.js" \
+  "$ROOT_DIR/www/luci-static/resources/view/iwand.js"
+install -Dm644 "$PROJECT/luci-app-iwand/root/usr/share/luci/menu.d/luci-app-iwand.json" \
+  "$ROOT_DIR/usr/share/luci/menu.d/luci-app-iwand.json"
+install -Dm644 "$PROJECT/luci-app-iwand/root/usr/share/rpcd/acl.d/luci-app-iwand.json" \
+  "$ROOT_DIR/usr/share/rpcd/acl.d/luci-app-iwand.json"
+
+# APK metadata directory
+PACKAGES_DIR="$ROOT_DIR/lib/apk/packages"
+mkdir -p "$PACKAGES_DIR"
+
+# conffiles
+cat > "$PACKAGES_DIR/.conffiles" <<'CONFFILES'
+/etc/config/iwand
+/etc/sdwan/iwan.conf
+CONFFILES
+
+# conffiles_static (sha256 checksums of default config)
+while IFS= read -r conffile; do
+  sha256=$(sha256sum "$ROOT_DIR$conffile" | cut -d' ' -f1)
+  echo "$conffile $sha256"
+done < "$PACKAGES_DIR/.conffiles" > "$PACKAGES_DIR/.conffiles_static"
+
+# file list (excluding metadata)
+(cd "$ROOT_DIR" && find . -type f -o -type l) \
+  | sed 's|^\./|/|' \
+  | grep -v '^/lib/apk/packages/' \
+  | sort > "$PACKAGES_DIR/.list"
+
+# Build APK
+apk --root "$APK_ROOT_DIR" mkpkg \
+  --info "name:iwand" \
+  --info "version:${APK_VERSION}" \
+  --info "description:Panabit iWAN SD-WAN client daemon" \
+  --info "arch:${ARCHITECTURE}" \
+  --info "license:MIT" \
+  --info "origin:iwand" \
+  --info "url:https://github.com/Ricky-Hao/iwand" \
+  --info "maintainer:Ricky-Hao <14084342+Ricky-Hao@users.noreply.github.com>" \
+  --info "depends:kmod-tun" \
+  --info "provider-priority:100" \
+  --files "$ROOT_DIR" \
+  --output "$OUTPUT_PATH"
+
+echo "Built APK: $OUTPUT_PATH (arch: $ARCHITECTURE, version: $APK_VERSION)"

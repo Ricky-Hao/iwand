@@ -80,7 +80,7 @@
 #define FRAG_SLOTS     10
 #define FRAG_BUF_SIZE  2048
 #define FRAG_TIMEOUT   5   /* seconds */
-#define ETHPKT_SIZE    16  /* sdwan_ethpkt header size */
+#define ETHPKT_SIZE    16  /* iwan_ethpkt header size */
 
 /* ── Forward declarations ───────────────────────────────── */
 static void log_msg(const char *fmt, ...);
@@ -824,9 +824,9 @@ typedef struct {
         uint16_t len;
         uint8_t  in_use;
     } frags[FRAG_SLOTS];
-} sdwan_client_t;
+} iwan_client_t;
 
-static sdwan_client_t g_clnt;
+static iwan_client_t g_clnt;
 static volatile sig_atomic_t g_quit = 0;
 static volatile sig_atomic_t g_reconnect = 0;
 static uint8_t g_frag_content[4096]; /* reassembled packet output buffer */
@@ -880,7 +880,7 @@ static int pkt_verify(const uint8_t *pkt, int pktlen)
  *  Protocol: key derivation
  * ────────────────────────────────────────────────────────── */
 
-static void derive_xor_key(sdwan_client_t *c)
+static void derive_xor_key(iwan_client_t *c)
 {
     /* key = MD5(username + password)[0:8] */
     char buf[128];
@@ -894,7 +894,7 @@ static void derive_xor_key(sdwan_client_t *c)
  *  Segment routing: key setup and decryption
  * ────────────────────────────────────────────────────────── */
 
-static void sr_setup_keys(sdwan_client_t *c)
+static void sr_setup_keys(iwan_client_t *c)
 {
     if (g_cfg.sr_count == 0) return;
 
@@ -932,7 +932,7 @@ static void sr_setup_keys(sdwan_client_t *c)
     aes_set_encrypt_key(keybuf, &c->sr_encrypt_key);
 }
 
-static int sr_decrypt(sdwan_client_t *c, uint8_t *data, int len, const uint8_t *srhdr)
+static int sr_decrypt(iwan_client_t *c, uint8_t *data, int len, const uint8_t *srhdr)
 {
     int block_size = ((srhdr[2] & 0x7) == 1) ? 16 : 32;
 
@@ -956,7 +956,7 @@ static int sr_decrypt(sdwan_client_t *c, uint8_t *data, int len, const uint8_t *
  *  Protocol: build OPEN packet
  * ────────────────────────────────────────────────────────── */
 
-static int build_open_pkt(sdwan_client_t *c, uint8_t *buf)
+static int build_open_pkt(iwan_client_t *c, uint8_t *buf)
 {
     uint8_t *p = buf;
 
@@ -1029,7 +1029,7 @@ static int build_open_pkt(sdwan_client_t *c, uint8_t *buf)
  *  Protocol: build ECHO_REQ packet
  * ────────────────────────────────────────────────────────── */
 
-static int build_echo_req(sdwan_client_t *c, uint8_t *buf)
+static int build_echo_req(iwan_client_t *c, uint8_t *buf)
 {
     /* Header */
     buf[0] = PKT_ECHOREQ;
@@ -1066,7 +1066,7 @@ static int build_echo_req(sdwan_client_t *c, uint8_t *buf)
  *  Protocol: send packet
  * ────────────────────────────────────────────────────────── */
 
-static int send_to_server(sdwan_client_t *c, const uint8_t *pkt, int len)
+static int send_to_server(iwan_client_t *c, const uint8_t *pkt, int len)
 {
     struct sockaddr_in addr;
     memset(&addr, 0, sizeof(addr));
@@ -1084,7 +1084,7 @@ static int send_to_server(sdwan_client_t *c, const uint8_t *pkt, int len)
  *  Protocol: handle OPENACK
  * ────────────────────────────────────────────────────────── */
 
-static void run_script(const char *script, const char *event, sdwan_client_t *c)
+static void run_script(const char *script, const char *event, iwan_client_t *c)
 {
     if (script[0] == '\0') return;
     if (access(script, X_OK) != 0) return;
@@ -1125,7 +1125,7 @@ static void run_script(const char *script, const char *event, sdwan_client_t *c)
     waitpid(pid, &status, 0);
 }
 
-static int handle_openack(sdwan_client_t *c, const uint8_t *pkt, int pktlen)
+static int handle_openack(iwan_client_t *c, const uint8_t *pkt, int pktlen)
 {
     if (c->state != STATE_AUTH_SENT) return 0;
 
@@ -1230,13 +1230,13 @@ static int handle_openack(sdwan_client_t *c, const uint8_t *pkt, int pktlen)
  *  Protocol: handle IP fragment reassembly (type 0x21)
  *
  *  IPFRAG packet layout:
- *    [0:8]   sdwan header
- *    [8:24]  sdwan_ethpkt: [0:8]=id_lo, [8:12]=id_hi, [12:16]=bitfield
+ *    [0:8]   iwan header
+ *    [8:24]  iwan_ethpkt: [0:8]=id_lo, [8:12]=id_hi, [12:16]=bitfield
  *            bitfield: bit0=eop, bits2-14=fragoff, bits15-25=fraglen
  *    [24:…]  fragment data (fraglen bytes)
  * ────────────────────────────────────────────────────────── */
 
-static int handle_ipfrag(sdwan_client_t *c, const uint8_t *pkt, int pktlen)
+static int handle_ipfrag(iwan_client_t *c, const uint8_t *pkt, int pktlen)
 {
     if (c->state != STATE_ESTABLISHED) return 0;
     if (pktlen < HDR_SIZE + ETHPKT_SIZE) return 0;
@@ -1353,7 +1353,7 @@ static int handle_ipfrag(sdwan_client_t *c, const uint8_t *pkt, int pktlen)
  *  Protocol: handle incoming packets
  * ────────────────────────────────────────────────────────── */
 
-static int handle_data(sdwan_client_t *c, const uint8_t *pkt, int pktlen)
+static int handle_data(iwan_client_t *c, const uint8_t *pkt, int pktlen)
 {
     if (c->state != STATE_ESTABLISHED) return 0;
     if (pktlen <= HDR_SIZE) return 0;
@@ -1376,7 +1376,7 @@ static int handle_data(sdwan_client_t *c, const uint8_t *pkt, int pktlen)
     return 1;
 }
 
-static int handle_echo_resp(sdwan_client_t *c, const uint8_t *pkt, int pktlen)
+static int handle_echo_resp(iwan_client_t *c, const uint8_t *pkt, int pktlen)
 {
     if (c->state != STATE_ESTABLISHED) return 0;
     if (!pkt_verify(pkt, pktlen)) return 0;
@@ -1394,7 +1394,7 @@ static int handle_echo_resp(sdwan_client_t *c, const uint8_t *pkt, int pktlen)
     return 1;
 }
 
-static int handle_close(sdwan_client_t *c, const uint8_t *pkt, int pktlen)
+static int handle_close(iwan_client_t *c, const uint8_t *pkt, int pktlen)
 {
     if (c->state != STATE_ESTABLISHED) return 0;
     if (!pkt_verify(pkt, pktlen)) return 0;
@@ -1404,7 +1404,7 @@ static int handle_close(sdwan_client_t *c, const uint8_t *pkt, int pktlen)
     return 1;
 }
 
-static void handle_openrej(sdwan_client_t *c, const uint8_t *pkt, int pktlen)
+static void handle_openrej(iwan_client_t *c, const uint8_t *pkt, int pktlen)
 {
     if (c->state != STATE_AUTH_SENT) return;
     log_msg("peer AUTH REJECTED\n");
@@ -1414,7 +1414,7 @@ static void handle_openrej(sdwan_client_t *c, const uint8_t *pkt, int pktlen)
 /* ──────────────────────────────────────────────────────────
  *  Protocol: handle segment routing (type 0x27)
  *
- *  SEGRT packet layout after sdwan header:
+ *  SEGRT packet layout after iwan header:
  *    [0] nextid — next hop index in link chain
  *    [1] linkcnt — total links
  *    [2] encrypt_algo (lower 3 bits) + encrypt_padlen (upper 5 bits)
@@ -1423,11 +1423,11 @@ static void handle_openrej(sdwan_client_t *c, const uint8_t *pkt, int pktlen)
  *  Then: the inner payload (DATA or IPFRAG)
  * ────────────────────────────────────────────────────────── */
 
-static int handle_segrt(sdwan_client_t *c, const uint8_t *pkt, int pktlen)
+static int handle_segrt(iwan_client_t *c, const uint8_t *pkt, int pktlen)
 {
     if (c->state != STATE_ESTABLISHED) return 0;
 
-    const uint8_t *base = pkt + HDR_SIZE; /* point past sdwan header */
+    const uint8_t *base = pkt + HDR_SIZE; /* point past iwan header */
     if (pktlen < HDR_SIZE + 4) return 0;    /* need at least srhdr */
 
     /* Parse SR header */
@@ -1471,7 +1471,7 @@ static int handle_segrt(sdwan_client_t *c, const uint8_t *pkt, int pktlen)
     if (decrypt_buf[0] != PKT_DATA && decrypt_buf[0] != PKT_DATA_ENC)
         return 0;
 
-    /* DATA: skip inner sdwan header */
+    /* DATA: skip inner iwan header */
     if (inner_len <= HDR_SIZE) return 0;
     uint8_t *data_start = decrypt_buf + HDR_SIZE;
     int data_len = inner_len - HDR_SIZE;
@@ -1486,7 +1486,7 @@ static int handle_segrt(sdwan_client_t *c, const uint8_t *pkt, int pktlen)
     return 1;
 }
 
-static void handle_recv(sdwan_client_t *c, const uint8_t *pkt, int pktlen)
+static void handle_recv(iwan_client_t *c, const uint8_t *pkt, int pktlen)
 {
     if (pktlen < HDR_SIZE) return;
 
@@ -1536,7 +1536,7 @@ static void handle_recv(sdwan_client_t *c, const uint8_t *pkt, int pktlen)
  *  Protocol: send TUN data to server
  * ────────────────────────────────────────────────────────── */
 
-static void handle_tun_recv(sdwan_client_t *c)
+static void handle_tun_recv(iwan_client_t *c)
 {
     uint8_t buf[MAX_PKT_SIZE];
     /* Leave room for header at the beginning */
@@ -1566,7 +1566,7 @@ static void handle_tun_recv(sdwan_client_t *c)
  *  DNS resolution
  * ────────────────────────────────────────────────────────── */
 
-static int resolve_server(sdwan_client_t *c)
+static int resolve_server(iwan_client_t *c)
 {
     /* Fast path: try as numeric IP first */
     struct in_addr addr;
@@ -1603,7 +1603,7 @@ static int resolve_server(sdwan_client_t *c)
  *  State machine: reset
  * ────────────────────────────────────────────────────────── */
 
-static void client_reset(sdwan_client_t *c)
+static void client_reset(iwan_client_t *c)
 {
     if (c->state == STATE_ESTABLISHED || c->state == STATE_CLOSED) {
         log_msg("connection %s, resetting\n",
@@ -1654,7 +1654,7 @@ static void client_reset(sdwan_client_t *c)
  *  State machine: timer tick (called every ~1 second)
  * ────────────────────────────────────────────────────────── */
 
-static void timer_tick(sdwan_client_t *c)
+static void timer_tick(iwan_client_t *c)
 {
     uint32_t now = mono_secs();
 

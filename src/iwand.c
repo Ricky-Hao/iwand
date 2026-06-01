@@ -502,6 +502,14 @@ static int cfg_load(const char *path)
         char *key = line;
         char *val = eq + 1;
 
+        /* Strip leading/trailing whitespace from key and value */
+        while (*key == ' ' || *key == '\t') key++;
+        { char *end = key + strlen(key) - 1;
+          while (end > key && (*end == ' ' || *end == '\t')) *end-- = '\0'; }
+        while (*val == ' ' || *val == '\t') val++;
+        { char *end = val + strlen(val) - 1;
+          while (end > val && (*end == ' ' || *end == '\t')) *end-- = '\0'; }
+
         if (strcmp(key, "server") == 0)
             strncpy(g_cfg.server, val, sizeof(g_cfg.server) - 1);
         else if (strcmp(key, "username") == 0)
@@ -699,7 +707,11 @@ static int tun_set_ip(const char *dev, uint32_t ip, uint32_t mask)
     }
 
     /* Read existing flags and add IFF_UP */
-    ioctl(sockfd, SIOCGIFFLAGS, &ifr);
+    if (ioctl(sockfd, SIOCGIFFLAGS, &ifr) < 0) {
+        log_msg("SIOCGIFFLAGS failed: %s\n", strerror(errno));
+        close(sockfd);
+        return -1;
+    }
     ifr.ifr_flags |= IFF_UP | IFF_RUNNING;
     if (ioctl(sockfd, SIOCSIFFLAGS, &ifr) < 0) {
         log_msg("SIOCSIFFLAGS UP failed: %s\n", strerror(errno));
@@ -1432,6 +1444,10 @@ static void handle_segrt(sdwan_client_t *c, const uint8_t *pkt, int pktlen)
     const uint8_t *data_start = inner + HDR_SIZE; /* skip inner sdwan header */
     int data_len = inner_len - HDR_SIZE;
     memcpy(decrypt_buf, data_start, data_len);
+
+    /* Apply XOR decryption if inner packet is DATA_ENC */
+    if (inner[0] == PKT_DATA_ENC)
+        xor_encrypt(c->xor_key, decrypt_buf, data_len);
 
     /* SR decrypt if SR encryption is configured */
     if (g_cfg.sr_count > 0 && g_cfg.sr_encrypt_mode > 0) {

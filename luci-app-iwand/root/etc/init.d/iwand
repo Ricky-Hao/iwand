@@ -9,23 +9,6 @@ PROG=/usr/sbin/iwand
 CONF_DIR=/var/run/iwand
 CONF_FILE="$CONF_DIR/iwan.conf"
 
-validate_section() {
-	uci_validate_section iwand iwand "$1" \
-		'enabled:bool:0' \
-		'interface:string:iwan0' \
-		'server:string' \
-		'username:string' \
-		'password:string' \
-		'port:port:4567' \
-		'mtu:range(46,1600):1400' \
-		'encrypt:bool:0' \
-		'pipeid:uinteger:0' \
-		'pipeidx:uinteger:0' \
-		'srlinks:string' \
-		'srpassword:string' \
-		'srencryptmode:range(0,2):0'
-}
-
 # Reject values containing newlines, brackets, equals, comments, or control characters
 validate_value() {
 	case "$1" in
@@ -38,7 +21,20 @@ generate_config() {
 	local enabled interface server username password port mtu encrypt
 	local pipeid pipeidx srlinks srpassword srencryptmode
 
-	validate_section "main" || {
+	uci_validate_section iwand iwand "main" \
+		'enabled:bool:0' \
+		'interface:string:iwan0' \
+		'server:string' \
+		'username:string' \
+		'password:string' \
+		'port:port:4567' \
+		'mtu:range(46,1600):1400' \
+		'encrypt:bool:0' \
+		'pipeid:uinteger:0' \
+		'pipeidx:uinteger:0' \
+		'srlinks:string' \
+		'srpassword:string' \
+		'srencryptmode:range(0,2):0' || {
 		echo "validation failed" >&2
 		return 2
 	}
@@ -107,6 +103,24 @@ stop_service() {
 
 service_triggers() {
 	procd_add_reload_trigger "iwand"
+	procd_add_validation validate_config
+}
+
+validate_config() {
+	uci_validate_section iwand iwand "main" \
+		'enabled:bool:0' \
+		'interface:string:iwan0' \
+		'server:string' \
+		'username:string' \
+		'password:string' \
+		'port:port:4567' \
+		'mtu:range(46,1600):1400' \
+		'encrypt:bool:0' \
+		'pipeid:uinteger:0' \
+		'pipeidx:uinteger:0' \
+		'srlinks:string' \
+		'srpassword:string' \
+		'srencryptmode:range(0,2):0'
 }
 
 reload_service() {

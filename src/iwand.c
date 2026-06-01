@@ -23,6 +23,7 @@
 #include <sys/types.h>
 #include <sys/stat.h>
 #include <sys/time.h>
+#include <sys/wait.h>
 #include <sys/socket.h>
 #include <sys/ioctl.h>
 #include <netinet/in.h>
@@ -354,8 +355,8 @@ static void aes_set_decrypt_key(const uint8_t key[16], aes_key_t *aeskey)
     /* Generate encrypt schedule first, then derive decrypt schedule */
     aes_set_encrypt_key(key, aeskey);
     uint32_t *rk = aeskey->rd_key;
-    /* Swap round keys: round 0 <-> round 10, round 1 <-> round 9, etc. */
-    for (int i = 0; i < 2; i++) {
+    /* Swap round keys: round 0 <-> round 10, 1 <-> 9, 2 <-> 8, 3 <-> 7, 4 <-> 6 */
+    for (int i = 0; i < 5; i++) {
         for (int j = 0; j < 4; j++) {
             uint32_t t = rk[i*4+j];
             rk[i*4+j] = rk[(10-i)*4+j];
@@ -460,17 +461,8 @@ static void aes_decrypt_block(const uint8_t in[16], uint8_t out[16], const aes_k
 
 static void xor_encrypt(const uint8_t key[8], uint8_t *data, int len)
 {
-    int blocks = len / 8;
-    uint32_t *key32 = (uint32_t *)key;
-    uint32_t *data32 = (uint32_t *)data;
-    for (int i = 0; i < blocks; i++) {
-        data32[i*2]   ^= key32[0];
-        data32[i*2+1] ^= key32[1];
-    }
-    int rem = len & 7;
-    uint8_t *tail = data + blocks * 8;
-    for (int i = 0; i < rem; i++)
-        tail[i] ^= key[i];
+    for (int i = 0; i < len; i++)
+        data[i] ^= key[i & 7];
 }
 
 /* ──────────────────────────────────────────────────────────
@@ -481,7 +473,7 @@ typedef struct {
     char server[64];
     char username[32];
     char password[32];
-    char tun_name[32];
+    char tun_name[IFNAMSIZ]; /* matches IFNAMSIZ to avoid truncation warnings */
     uint16_t port;
     uint16_t mtu;
     uint8_t  encrypt;
@@ -538,26 +530,41 @@ static int cfg_load(const char *path)
             strncpy(g_cfg.username, val, sizeof(g_cfg.username) - 1);
         else if (strcmp(key, "password") == 0)
             strncpy(g_cfg.password, val, sizeof(g_cfg.password) - 1);
-        else if (strcmp(key, "port") == 0)
-            g_cfg.port = (uint16_t)atoi(val);
-        else if (strcmp(key, "mtu") == 0)
-            g_cfg.mtu = (uint16_t)atoi(val);
+        else if (strcmp(key, "port") == 0) {
+            unsigned long v = strtoul(val, NULL, 10);
+            if (v > 0 && v <= 65535) g_cfg.port = (uint16_t)v;
+        }
+        else if (strcmp(key, "mtu") == 0) {
+            unsigned long v = strtoul(val, NULL, 10);
+            if (v >= 46 && v <= 1600) g_cfg.mtu = (uint16_t)v;
+        }
         else if (strcmp(key, "encrypt") == 0)
-            g_cfg.encrypt = atoi(val) ? 1 : 0;
-        else if (strcmp(key, "pipeid") == 0)
-            g_cfg.pipeid = (uint16_t)atoi(val);
-        else if (strcmp(key, "pipeidx") == 0)
-            g_cfg.pipeidx = (uint16_t)atoi(val);
+            g_cfg.encrypt = (val[0] == '1') ? 1 : 0;
+        else if (strcmp(key, "pipeid") == 0) {
+            unsigned long v = strtoul(val, NULL, 10);
+            if (v <= 65535) g_cfg.pipeid = (uint16_t)v;
+        }
+        else if (strcmp(key, "pipeidx") == 0) {
+            unsigned long v = strtoul(val, NULL, 10);
+            if (v <= 65535) g_cfg.pipeidx = (uint16_t)v;
+        }
         else if (strcmp(key, "srlinks") == 0) {
-            /* Parse comma-separated IP list: "ip1,ip2,ip3" */
+            /* Parse comma-separated IP list: "1.2.3.4,5.6.7.8" or numeric */
             g_cfg.sr_count = 0;
             char tmp[256];
             strncpy(tmp, val, sizeof(tmp) - 1);
+            tmp[sizeof(tmp) - 1] = '\0';
             char *p = tmp;
             while (*p && g_cfg.sr_count < 6) {
                 char *comma = strchr(p, ',');
                 if (comma) *comma = '\0';
-                g_cfg.sr_links[g_cfg.sr_count] = htonl(strtoul(p, NULL, 10));
+                struct in_addr addr;
+                if (inet_pton(AF_INET, p, &addr) == 1) {
+                    g_cfg.sr_links[g_cfg.sr_count] = addr.s_addr;
+                } else {
+                    /* Fallback: try as numeric (protocol compat) */
+                    g_cfg.sr_links[g_cfg.sr_count] = htonl(strtoul(p, NULL, 10));
+                }
                 g_cfg.sr_count++;
                 if (!comma) break;
                 p = comma + 1;
@@ -565,8 +572,14 @@ static int cfg_load(const char *path)
         }
         else if (strcmp(key, "srpassword") == 0)
             strncpy(g_cfg.sr_password, val, sizeof(g_cfg.sr_password) - 1);
-        else if (strcmp(key, "srencryptmode") == 0)
-            g_cfg.sr_encrypt_mode = (uint8_t)atoi(val);
+        else if (strcmp(key, "srencryptmode") == 0) {
+            unsigned long v = strtoul(val, NULL, 10);
+            if (v <= 2) g_cfg.sr_encrypt_mode = (uint8_t)v;
+        }
+        else if (strcmp(key, "up_script") == 0)
+            strncpy(g_cfg.up_script, val, sizeof(g_cfg.up_script) - 1);
+        else if (strcmp(key, "down_script") == 0)
+            strncpy(g_cfg.down_script, val, sizeof(g_cfg.down_script) - 1);
     }
     fclose(fp);
     return 0;
@@ -589,6 +602,9 @@ static int cfg_valid(void)
     if (g_cfg.password[0] == '\0') {
         log_msg("config error: no password\n");
         return 0;
+    }
+    if (strlen(g_cfg.password) > 16) {
+        log_msg("config warning: password longer than 16 chars will be truncated\n");
     }
     if (g_cfg.mtu < 46 || g_cfg.mtu > 1600) {
         log_msg("config error: MTU must be 46-1600 (got %d)\n", g_cfg.mtu);
@@ -669,7 +685,7 @@ static int tun_open(const char *dev)
     struct ifreq ifr;
     memset(&ifr, 0, sizeof(ifr));
     ifr.ifr_flags = IFF_TUN | IFF_NO_PI;
-    strncpy(ifr.ifr_name, dev, IFNAMSIZ - 1);
+    snprintf(ifr.ifr_name, IFNAMSIZ, "%s", dev);
     if (ioctl(fd, TUNSETIFF, &ifr) < 0) {
         log_msg("TUNSETIFF failed: %s\n", strerror(errno));
         close(fd);
@@ -684,7 +700,7 @@ static int tun_set_ip(const char *dev, uint32_t ip, uint32_t mask)
     if (sockfd < 0) return -1;
     struct ifreq ifr;
     memset(&ifr, 0, sizeof(ifr));
-    strncpy(ifr.ifr_name, dev, IFNAMSIZ - 1);
+    snprintf(ifr.ifr_name, IFNAMSIZ, "%s", dev);
 
     struct sockaddr_in *addr = (struct sockaddr_in *)&ifr.ifr_addr;
     addr->sin_family = AF_INET;
@@ -719,7 +735,7 @@ static int tun_set_mtu(const char *dev, int mtu)
     if (sockfd < 0) return -1;
     struct ifreq ifr;
     memset(&ifr, 0, sizeof(ifr));
-    strncpy(ifr.ifr_name, dev, IFNAMSIZ - 1);
+    snprintf(ifr.ifr_name, IFNAMSIZ, "%s", dev);
     ifr.ifr_mtu = mtu;
     int ret = ioctl(sockfd, SIOCSIFMTU, &ifr);
     if (ret < 0)
@@ -734,7 +750,7 @@ static void tun_clear_ip(const char *dev)
     if (sockfd < 0) return;
     struct ifreq ifr;
     memset(&ifr, 0, sizeof(ifr));
-    strncpy(ifr.ifr_name, dev, IFNAMSIZ - 1);
+    snprintf(ifr.ifr_name, IFNAMSIZ, "%s", dev);
 
     /* Remove address */
     struct sockaddr_in *addr = (struct sockaddr_in *)&ifr.ifr_addr;
@@ -744,7 +760,7 @@ static void tun_clear_ip(const char *dev)
 
     /* Bring interface down */
     memset(&ifr, 0, sizeof(ifr));
-    strncpy(ifr.ifr_name, dev, IFNAMSIZ - 1);
+    snprintf(ifr.ifr_name, IFNAMSIZ, "%s", dev);
     ioctl(sockfd, SIOCGIFFLAGS, &ifr);
     ifr.ifr_flags &= ~(IFF_UP | IFF_RUNNING);
     ioctl(sockfd, SIOCSIFFLAGS, &ifr);
@@ -813,8 +829,8 @@ typedef struct {
 } sdwan_client_t;
 
 static sdwan_client_t g_clnt;
-static volatile int g_quit = 0;
-static volatile int g_reconnect = 0;
+static volatile sig_atomic_t g_quit = 0;
+static volatile sig_atomic_t g_reconnect = 0;
 static uint8_t g_frag_content[4096]; /* reassembled packet output buffer */
 
 static uint32_t mono_secs(void)
@@ -849,8 +865,9 @@ static uint8_t *pkt_sign(uint8_t *pkt)
 }
 
 /* Verify packet signature. Returns 1 if valid, 0 if not. */
-static int pkt_verify(const uint8_t *pkt)
+static int pkt_verify(const uint8_t *pkt, int pktlen)
 {
+    if (pktlen < HDR_SIZE + SIGN_SIZE) return 0;
     md5_ctx_t ctx;
     md5_init(&ctx);
     md5_update(&ctx, pkt, HDR_SIZE);
@@ -1058,7 +1075,7 @@ static int send_to_server(sdwan_client_t *c, const uint8_t *pkt, int len)
     addr.sin_port = htons(c->server_port);
 
     int n = sendto(c->udp_fd, pkt, len, 0, (struct sockaddr *)&addr, sizeof(addr));
-    if (n != len)
+    if (n < 0)
         log_msg("sendto error: %s\n", strerror(errno));
     return n;
 }
@@ -1072,7 +1089,7 @@ static void run_script(const char *script, const char *event, sdwan_client_t *c)
     if (script[0] == '\0') return;
     if (access(script, X_OK) != 0) return;
 
-    char ip_str[16], dns0_str[16], dns1_str[16];
+    char ip_str[16], dns0_str[16], dns1_str[16], mtu_str[8];
     uint32_t ip_h = ntohl(c->peer_ip);
     uint32_t dns0_h = ntohl(c->dns0);
     uint32_t dns1_h = ntohl(c->dns1);
@@ -1082,14 +1099,29 @@ static void run_script(const char *script, const char *event, sdwan_client_t *c)
              (dns0_h>>24)&0xff, (dns0_h>>16)&0xff, (dns0_h>>8)&0xff, dns0_h&0xff);
     snprintf(dns1_str, sizeof(dns1_str), "%u.%u.%u.%u",
              (dns1_h>>24)&0xff, (dns1_h>>16)&0xff, (dns1_h>>8)&0xff, dns1_h&0xff);
+    snprintf(mtu_str, sizeof(mtu_str), "%d",
+             c->server_mtu > 0 ? c->server_mtu : g_cfg.mtu);
 
-    char cmd[512];
-    snprintf(cmd, sizeof(cmd), "%s %s %s %s %d %s %s",
-             script, event, g_cfg.tun_name, ip_str,
-             c->server_mtu > 0 ? c->server_mtu : g_cfg.mtu,
-             dns0_str, dns1_str);
-    log_msg("running: %s\n", cmd);
-    system(cmd);
+    log_msg("running: %s %s %s %s %s %s %s\n",
+            script, event, g_cfg.tun_name, ip_str, mtu_str, dns0_str, dns1_str);
+
+    pid_t pid = fork();
+    if (pid < 0) {
+        log_msg("fork failed: %s\n", strerror(errno));
+        return;
+    }
+    if (pid == 0) {
+        /* Child: exec the script with arguments (no shell) */
+        char *argv[] = {
+            (char *)script, (char *)event, g_cfg.tun_name,
+            ip_str, mtu_str, dns0_str, dns1_str, NULL
+        };
+        execv(script, argv);
+        _exit(127);
+    }
+    /* Parent: wait for child */
+    int status;
+    waitpid(pid, &status, 0);
 }
 
 static void handle_openack(sdwan_client_t *c, const uint8_t *pkt, int pktlen)
@@ -1097,7 +1129,7 @@ static void handle_openack(sdwan_client_t *c, const uint8_t *pkt, int pktlen)
     if (c->state != STATE_AUTH_SENT) return;
 
     /* Verify signature */
-    if (!pkt_verify(pkt)) {
+    if (!pkt_verify(pkt, pktlen)) {
         log_msg("OPENACK: signature verification failed\n");
         return;
     }
@@ -1153,10 +1185,16 @@ static void handle_openack(sdwan_client_t *c, const uint8_t *pkt, int pktlen)
         remain -= tlen;
     }
 
+    /* Require peer IP to be present before establishing */
+    if (c->peer_ip == 0) {
+        log_msg("OPENACK: no peer IP in response, rejecting\n");
+        return;
+    }
+
     /* Transition to ESTABLISHED */
     c->state = STATE_ESTABLISHED;
-    c->session_token = *(uint16_t *)(pkt + 2); /* opaque wire bytes */
-    c->session_id = *(uint32_t *)(pkt + 4);    /* opaque wire bytes */
+    memcpy(&c->session_token, pkt + 2, 2); /* safe unaligned copy */
+    memcpy(&c->session_id, pkt + 4, 4);    /* safe unaligned copy */
     c->last_recv_time = mono_secs();
     c->echo_counter = 0;
 
@@ -1232,16 +1270,24 @@ static void handle_ipfrag(sdwan_client_t *c, const uint8_t *pkt, int pktlen)
             break;
         }
 
-        int total_len = c->frags[i].len + fraglen;
-        if (total_len > (int)sizeof(g_frag_content)) break;
+        int total_len;
 
         if (eop == 0) {
             /* Not last fragment: new data first, then accumulated */
+            total_len = c->frags[i].len + fraglen;
+            if (total_len > (int)sizeof(g_frag_content)) break;
+            memset(g_frag_content, 0, sizeof(g_frag_content));
             memcpy(g_frag_content, frag_data, fraglen);
             memcpy(g_frag_content + fraglen, c->frags[i].buf, c->frags[i].len);
         } else {
-            /* Last fragment: accumulated first, then this at fragoff */
-            memcpy(g_frag_content, c->frags[i].buf, c->frags[i].len);
+            /* Last fragment: compute total from fragoff + fraglen */
+            total_len = fragoff + fraglen;
+            if (total_len < (int)c->frags[i].len)
+                total_len = c->frags[i].len;
+            if (total_len > (int)sizeof(g_frag_content)) break;
+            memset(g_frag_content, 0, sizeof(g_frag_content));
+            if (c->frags[i].len <= (int)sizeof(g_frag_content))
+                memcpy(g_frag_content, c->frags[i].buf, c->frags[i].len);
             if (fragoff + fraglen <= (int)sizeof(g_frag_content))
                 memcpy(g_frag_content + fragoff, frag_data, fraglen);
         }
@@ -1314,7 +1360,7 @@ static void handle_data(sdwan_client_t *c, const uint8_t *pkt, int pktlen)
 static void handle_echo_resp(sdwan_client_t *c, const uint8_t *pkt, int pktlen)
 {
     if (c->state != STATE_ESTABLISHED) return;
-    if (!pkt_verify(pkt)) return;
+    if (!pkt_verify(pkt, pktlen)) return;
 
     /* Calculate delay from timestamp in echo response */
     uint64_t now = mono_usecs();
@@ -1331,7 +1377,7 @@ static void handle_echo_resp(sdwan_client_t *c, const uint8_t *pkt, int pktlen)
 static void handle_close(sdwan_client_t *c, const uint8_t *pkt, int pktlen)
 {
     if (c->state != STATE_ESTABLISHED) return;
-    if (!pkt_verify(pkt)) return;
+    if (!pkt_verify(pkt, pktlen)) return;
 
     log_msg("peer CLOSED\n");
     c->state = STATE_CLOSED;
@@ -1374,8 +1420,8 @@ static void handle_segrt(sdwan_client_t *c, const uint8_t *pkt, int pktlen)
 
     /* Check if inner packet is IPFRAG (type 0x22 in SR context) */
     if (inner[0] == 0x22) {
-        /* Forward to IPFRAG handler, passing SR header for decrypt context */
-        handle_ipfrag(c, pkt, pktlen);
+        /* Pass inner packet directly to IPFRAG handler */
+        handle_ipfrag(c, inner, inner_len);
         return;
     }
 
@@ -1383,10 +1429,11 @@ static void handle_segrt(sdwan_client_t *c, const uint8_t *pkt, int pktlen)
     uint8_t decrypt_buf[MAX_PKT_SIZE];
     if (inner_len > (int)sizeof(decrypt_buf)) return;
 
+    /* Validate inner_len has room for inner header */
+    if (inner_len <= HDR_SIZE) return;
+
     const uint8_t *data_start = inner + HDR_SIZE; /* skip inner sdwan header */
     int data_len = inner_len - HDR_SIZE;
-
-    if (data_len <= 0) return;
     memcpy(decrypt_buf, data_start, data_len);
 
     /* SR decrypt if SR encryption is configured */
@@ -1412,11 +1459,11 @@ static void handle_recv(sdwan_client_t *c, const uint8_t *pkt, int pktlen)
 
     uint8_t pkt_type = pkt[0];
     c->rx_pkts++;
-    c->last_recv_time = mono_secs();
 
     /* DATA packets — original binary does NOT validate session on DATA,
      * only checks source IP:port (already done by caller). */
     if (pkt_type == PKT_DATA || pkt_type == PKT_DATA_ENC) {
+        c->last_recv_time = mono_secs();
         handle_data(c, pkt, pktlen);
         return;
     }
@@ -1441,8 +1488,11 @@ static void handle_recv(sdwan_client_t *c, const uint8_t *pkt, int pktlen)
         handle_segrt(c, pkt, pktlen);
         break;
     default:
-        break;
+        return; /* unknown type — don't update liveness */
     }
+
+    /* Update liveness only after successful dispatch */
+    c->last_recv_time = mono_secs();
 }
 
 /* ──────────────────────────────────────────────────────────
@@ -1490,7 +1540,7 @@ static int resolve_server(sdwan_client_t *c)
     }
 
     /* Domain name: resolve via getaddrinfo */
-    strncpy(c->server_domain, g_cfg.server, sizeof(c->server_domain) - 1);
+    snprintf(c->server_domain, sizeof(c->server_domain), "%s", g_cfg.server);
     struct addrinfo hints, *res;
     memset(&hints, 0, sizeof(hints));
     hints.ai_family = AF_INET;
@@ -1645,20 +1695,18 @@ static void timer_tick(sdwan_client_t *c)
 
 static void sig_handler(int signo)
 {
-    log_msg("received signal %d, exiting\n", signo);
+    (void)signo;
     g_quit = 1;
 }
 
 static void sig_reconnect(int signo)
 {
     (void)signo;
-    log_msg("received SIGUSR1, triggering reconnect\n");
     g_reconnect = 1;
 }
 
 static void sig_segfault(int signo)
 {
-    log_msg("FATAL: segmentation fault (signal %d)\n", signo);
     /* SA_RESETHAND restores default handler, so re-raise produces core dump */
     raise(signo);
 }
@@ -1746,9 +1794,9 @@ int main(int argc, char *argv[])
             log_path = log_abspath;
         else {
             /* Log file may not exist yet; build absolute path manually */
-            if (getcwd(log_abspath, sizeof(log_abspath) - strlen(log_path) - 2)) {
-                strcat(log_abspath, "/");
-                strcat(log_abspath, log_path);
+            char cwd[PATH_MAX];
+            if (getcwd(cwd, sizeof(cwd))) {
+                snprintf(log_abspath, sizeof(log_abspath), "%s/%s", cwd, log_path);
                 log_path = log_abspath;
             }
         }
@@ -1818,7 +1866,6 @@ int main(int argc, char *argv[])
     }
 
     log_msg("SD-WAN client started successfully\n");
-    printf("SD-WAN client started successfully\n");
 
     /* ── Main event loop ────────────────────────────────── */
     uint32_t last_tick = mono_secs();
@@ -1827,6 +1874,7 @@ int main(int argc, char *argv[])
         /* Handle SIGUSR1 reconnect */
         if (g_reconnect) {
             g_reconnect = 0;
+            log_msg("received SIGUSR1, triggering reconnect\n");
             client_reset(&g_clnt);
         }
 

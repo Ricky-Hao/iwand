@@ -3,7 +3,6 @@
 'require form';
 'require uci';
 'require rpc';
-'require fs';
 'require poll';
 
 var callServiceList = rpc.declare({
@@ -37,8 +36,7 @@ return view.extend({
 	load: function () {
 		return Promise.all([
 			uci.load('iwand'),
-			getServiceStatus(),
-			L.resolveDefault(fs.read('/var/run/iwand/iwan.conf'), '')
+			getServiceStatus()
 		]);
 	},
 

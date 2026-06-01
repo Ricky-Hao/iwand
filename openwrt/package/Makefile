@@ -32,6 +32,7 @@ define Package/iwand/description
 endef
 
 define Package/iwand/conffiles
+/etc/config/iwand
 /etc/sdwan/iwan.conf
 endef
 
@@ -39,7 +40,6 @@ define Build/Compile
 	$(TARGET_CC) \
 		$(TARGET_CFLAGS) \
 		$(TARGET_LDFLAGS) \
-		-static \
 		-o $(PKG_BUILD_DIR)/iwand \
 		$(PKG_BUILD_DIR)/src/iwand.c
 endef
@@ -49,7 +49,10 @@ define Package/iwand/install
 	$(INSTALL_BIN) $(PKG_BUILD_DIR)/iwand $(1)/usr/sbin/
 
 	$(INSTALL_DIR) $(1)/etc/init.d
-	$(INSTALL_BIN) $(PKG_BUILD_DIR)/openwrt/iwand.init $(1)/etc/init.d/iwand
+	$(INSTALL_BIN) $(PKG_BUILD_DIR)/luci-app-iwand/root/etc/init.d/iwand $(1)/etc/init.d/iwand
+
+	$(INSTALL_DIR) $(1)/etc/config
+	$(CP) $(PKG_BUILD_DIR)/luci-app-iwand/root/etc/config/iwand $(1)/etc/config/iwand
 
 	$(INSTALL_DIR) $(1)/etc/sdwan
 	[ -f $(1)/etc/sdwan/iwan.conf ] || \

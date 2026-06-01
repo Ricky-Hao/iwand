@@ -33,7 +33,6 @@ endef
 
 define Package/iwand/conffiles
 /etc/config/iwand
-/etc/iwan/iwan.conf
 endef
 
 define Build/Compile
@@ -54,11 +53,6 @@ define Package/iwand/install
 	$(INSTALL_DIR) $(1)/etc/config
 	$(INSTALL_CONF) $(PKG_BUILD_DIR)/luci-app-iwand/root/etc/config/iwand $(1)/etc/config/iwand
 	chmod 0600 $(1)/etc/config/iwand
-
-	$(INSTALL_DIR) $(1)/etc/iwan
-	[ -f $(1)/etc/iwan/iwan.conf ] || \
-		$(INSTALL_CONF) $(PKG_BUILD_DIR)/openwrt/iwan.conf.example $(1)/etc/iwan/iwan.conf
-	chmod 0600 $(1)/etc/iwan/iwan.conf
 endef
 
 $(eval $(call BuildPackage,iwand))

@@ -75,7 +75,6 @@ jobs:
           chmod 755 dist/iwand
           chmod 755 openwrt/iwand.init
           chmod 755 luci-app-iwand/root/etc/init.d/iwand
-          chmod 600 openwrt/iwan.conf.example
           chmod 600 luci-app-iwand/root/etc/config/iwand
           fpm -t deb -s dir \
             --name iwand \
@@ -89,12 +88,10 @@ jobs:
             --no-deb-generate-changes \
             --deb-compression gz \
             --depends kmod-tun \
-            --config-files /etc/iwan/iwan.conf \
             --config-files /etc/config/iwand \
             -p dist/iwand.deb \
             dist/iwand=/usr/sbin/iwand \
             luci-app-iwand/root/etc/init.d/iwand=/etc/init.d/iwand \
-            openwrt/iwan.conf.example=/etc/iwan/iwan.conf \
             luci-app-iwand/root/etc/config/iwand=/etc/config/iwand \
             luci-app-iwand/htdocs/luci-static/resources/view/iwand.js=/www/luci-static/resources/view/iwand.js \
             luci-app-iwand/root/usr/share/luci/menu.d/luci-app-iwand.json=/usr/share/luci/menu.d/luci-app-iwand.json \

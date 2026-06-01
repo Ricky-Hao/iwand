@@ -53,6 +53,7 @@
 #define PKT_CLOSE     0x17
 #define PKT_DATA_ENC  0x18
 #define PKT_IPFRAG    0x21
+#define PKT_IPFRAG_SR 0x22  /* IPFRAG within segment routing context */
 #define PKT_SEGRT     0x27
 
 /* ── Client states ──────────────────────────────────────── */
@@ -1453,7 +1454,7 @@ static void handle_segrt(sdwan_client_t *c, const uint8_t *pkt, int pktlen)
     }
 
     /* Now dispatch based on decrypted inner packet type */
-    if (decrypt_buf[0] == 0x22) {
+    if (decrypt_buf[0] == PKT_IPFRAG_SR) {
         /* IPFRAG in SR context — pass decrypted inner to handler */
         handle_ipfrag(c, decrypt_buf, inner_len);
         return;

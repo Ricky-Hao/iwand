@@ -504,11 +504,13 @@ static int cfg_load(const char *path)
 
         /* Strip leading/trailing whitespace from key and value */
         while (*key == ' ' || *key == '\t') key++;
-        { char *end = key + strlen(key) - 1;
-          while (end > key && (*end == ' ' || *end == '\t')) *end-- = '\0'; }
+        { size_t klen = strlen(key);
+          if (klen > 0) { char *end = key + klen - 1;
+            while (end > key && (*end == ' ' || *end == '\t')) *end-- = '\0'; } }
         while (*val == ' ' || *val == '\t') val++;
-        { char *end = val + strlen(val) - 1;
-          while (end > val && (*end == ' ' || *end == '\t')) *end-- = '\0'; }
+        { size_t vlen = strlen(val);
+          if (vlen > 0) { char *end = val + vlen - 1;
+            while (end > val && (*end == ' ' || *end == '\t')) *end-- = '\0'; } }
 
         if (strcmp(key, "server") == 0)
             strncpy(g_cfg.server, val, sizeof(g_cfg.server) - 1);
@@ -922,7 +924,8 @@ static void sr_setup_keys(sdwan_client_t *c)
 
     /* Set decrypt and encrypt keys based on mode */
     if (g_cfg.sr_encrypt_mode == 2) {
-        log_msg("WARNING: AES-256 SR encryption not supported, using AES-128\n");
+        log_msg("WARNING: AES-256 SR encryption not supported, falling back to AES-128\n");
+        g_cfg.sr_encrypt_mode = 1;
     }
     aes_set_decrypt_key(keybuf, &c->sr_decrypt_key);
     aes_set_encrypt_key(keybuf, &c->sr_encrypt_key);

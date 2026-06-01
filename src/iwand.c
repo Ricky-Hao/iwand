@@ -1376,7 +1376,9 @@ static int handle_close(sdwan_client_t *c, const uint8_t *pkt, int pktlen)
 
 static void handle_openrej(sdwan_client_t *c, const uint8_t *pkt, int pktlen)
 {
+    if (c->state != STATE_AUTH_SENT) return;
     log_msg("peer AUTH REJECTED\n");
+    c->state = STATE_CLOSED; /* trigger reset on next timer tick */
 }
 
 /* ──────────────────────────────────────────────────────────
@@ -1466,7 +1468,8 @@ static void handle_recv(sdwan_client_t *c, const uint8_t *pkt, int pktlen)
         break;
     case PKT_OPENREJ:
         handle_openrej(c, pkt, pktlen);
-        accepted = 1; /* no signature to verify */
+        /* Don't update liveness — OPENREJ has no signature and should
+         * not prevent AUTH_TIMEOUT from triggering reconnect/re-resolve */
         break;
     case PKT_ECHORESP:
         accepted = handle_echo_resp(c, pkt, pktlen);
@@ -1564,8 +1567,9 @@ static int resolve_server(sdwan_client_t *c)
 
 static void client_reset(sdwan_client_t *c)
 {
-    if (c->state == STATE_ESTABLISHED) {
-        log_msg("connection lost, resetting\n");
+    if (c->state == STATE_ESTABLISHED || c->state == STATE_CLOSED) {
+        log_msg("connection %s, resetting\n",
+                c->state == STATE_CLOSED ? "closed by peer" : "lost");
         tun_clear_ip(g_cfg.tun_name);
         run_script(g_cfg.down_script, "down", c);
     }

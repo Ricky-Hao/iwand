@@ -74,6 +74,7 @@ jobs:
           chmod 755 dist/iwand
           chmod 755 openwrt/iwand.init
           chmod 755 luci-app-iwand/root/etc/init.d/iwand
+          chmod 600 openwrt/iwan.conf.example
           fpm -t deb -s dir \
             --name iwand \
             --version "${{ steps.version.outputs.version }}" \

@@ -54,7 +54,7 @@ install -Dm755 "$BINARY_PATH" "$ROOT_DIR/usr/sbin/iwand"
 install -Dm755 "$PROJECT/luci-app-iwand/root/etc/init.d/iwand" "$ROOT_DIR/etc/init.d/iwand"
 
 # Config files
-install -Dm644 "$PROJECT/openwrt/iwan.conf.example" "$ROOT_DIR/etc/sdwan/iwan.conf"
+install -Dm600 "$PROJECT/openwrt/iwan.conf.example" "$ROOT_DIR/etc/sdwan/iwan.conf"
 install -Dm644 "$PROJECT/luci-app-iwand/root/etc/config/iwand" "$ROOT_DIR/etc/config/iwand"
 
 # LuCI files

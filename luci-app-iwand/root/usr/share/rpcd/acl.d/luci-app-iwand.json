@@ -4,18 +4,11 @@
 		"read": {
 			"uci": [ "iwand" ],
 			"ubus": {
-				"service": [ "list" ],
-				"file": [ "exec", "read" ]
-			},
-			"file": {
-				"/var/run/iwand/*": [ "read" ]
+				"service": [ "list" ]
 			}
 		},
 		"write": {
-			"uci": [ "iwand" ],
-			"ubus": {
-				"service": [ "signal" ]
-			}
+			"uci": [ "iwand" ]
 		}
 	}
 }

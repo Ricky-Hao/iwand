@@ -825,6 +825,7 @@ typedef struct {
         uint32_t id;
         uint16_t off;
         uint16_t len;
+        uint8_t  in_use;
     } frags[FRAG_SLOTS];
 } sdwan_client_t;
 
@@ -926,8 +927,9 @@ static void sr_setup_keys(sdwan_client_t *c)
     }
 
     /* Set decrypt and encrypt keys based on mode */
-    int bits = (g_cfg.sr_encrypt_mode == 1) ? 128 : 256;
-    (void)bits; /* We only support AES-128 in this implementation */
+    if (g_cfg.sr_encrypt_mode == 2) {
+        log_msg("WARNING: AES-256 SR encryption not supported, using AES-128\n");
+    }
     aes_set_decrypt_key(keybuf, &c->sr_decrypt_key);
     aes_set_encrypt_key(keybuf, &c->sr_encrypt_key);
 }
@@ -1124,14 +1126,14 @@ static void run_script(const char *script, const char *event, sdwan_client_t *c)
     waitpid(pid, &status, 0);
 }
 
-static void handle_openack(sdwan_client_t *c, const uint8_t *pkt, int pktlen)
+static int handle_openack(sdwan_client_t *c, const uint8_t *pkt, int pktlen)
 {
-    if (c->state != STATE_AUTH_SENT) return;
+    if (c->state != STATE_AUTH_SENT) return 0;
 
     /* Verify signature */
     if (!pkt_verify(pkt, pktlen)) {
         log_msg("OPENACK: signature verification failed\n");
-        return;
+        return 0;
     }
 
     /* Parse TLVs after header + signature */
@@ -1188,7 +1190,7 @@ static void handle_openack(sdwan_client_t *c, const uint8_t *pkt, int pktlen)
     /* Require peer IP to be present before establishing */
     if (c->peer_ip == 0) {
         log_msg("OPENACK: no peer IP in response, rejecting\n");
-        return;
+        return 0;
     }
 
     /* Transition to ESTABLISHED */
@@ -1218,6 +1220,7 @@ static void handle_openack(sdwan_client_t *c, const uint8_t *pkt, int pktlen)
 
     /* Run up script */
     run_script(g_cfg.up_script, "up", c);
+    return 1;
 }
 
 /* ──────────────────────────────────────────────────────────
@@ -1261,11 +1264,11 @@ static void handle_ipfrag(sdwan_client_t *c, const uint8_t *pkt, int pktlen)
     /* Search for existing slot with matching id */
     int found = 0;
     for (int i = 0; i < FRAG_SLOTS; i++) {
-        if (c->frags[i].id != frag_id) continue;
+        if (!c->frags[i].in_use || c->frags[i].id != frag_id) continue;
 
         /* Check timeout */
         if (now - c->frags[i].timestamp >= FRAG_TIMEOUT) {
-            c->frags[i].id = 0;
+            c->frags[i].in_use = 0;
             found = 1;
             break;
         }
@@ -1275,7 +1278,7 @@ static void handle_ipfrag(sdwan_client_t *c, const uint8_t *pkt, int pktlen)
         if (eop == 0) {
             /* Not last fragment: new data first, then accumulated */
             total_len = c->frags[i].len + fraglen;
-            if (total_len > (int)sizeof(g_frag_content)) break;
+            if (total_len > (int)sizeof(g_frag_content)) { found = 1; break; }
             memset(g_frag_content, 0, sizeof(g_frag_content));
             memcpy(g_frag_content, frag_data, fraglen);
             memcpy(g_frag_content + fraglen, c->frags[i].buf, c->frags[i].len);
@@ -1284,7 +1287,7 @@ static void handle_ipfrag(sdwan_client_t *c, const uint8_t *pkt, int pktlen)
             total_len = fragoff + fraglen;
             if (total_len < (int)c->frags[i].len)
                 total_len = c->frags[i].len;
-            if (total_len > (int)sizeof(g_frag_content)) break;
+            if (total_len > (int)sizeof(g_frag_content)) { found = 1; break; }
             memset(g_frag_content, 0, sizeof(g_frag_content));
             if (c->frags[i].len <= (int)sizeof(g_frag_content))
                 memcpy(g_frag_content, c->frags[i].buf, c->frags[i].len);
@@ -1298,7 +1301,7 @@ static void handle_ipfrag(sdwan_client_t *c, const uint8_t *pkt, int pktlen)
                 xor_encrypt(c->xor_key, g_frag_content, total_len);
             write(c->tun_fd, g_frag_content, total_len);
             c->tun_tx++;
-            c->frags[i].id = 0;
+            c->frags[i].in_use = 0;
         } else {
             /* Store accumulated data back to slot */
             if (total_len <= FRAG_BUF_SIZE) {
@@ -1315,7 +1318,7 @@ static void handle_ipfrag(sdwan_client_t *c, const uint8_t *pkt, int pktlen)
     /* No matching slot — find an empty or expired one */
     int slot_idx = -1;
     for (int i = 0; i < FRAG_SLOTS; i++) {
-        if (c->frags[i].id == 0 || (now - c->frags[i].timestamp >= FRAG_TIMEOUT)) {
+        if (!c->frags[i].in_use || (now - c->frags[i].timestamp >= FRAG_TIMEOUT)) {
             slot_idx = i;
             break;
         }
@@ -1323,6 +1326,7 @@ static void handle_ipfrag(sdwan_client_t *c, const uint8_t *pkt, int pktlen)
     if (slot_idx < 0) return;
 
     /* Initialize new slot */
+    c->frags[slot_idx].in_use = 1;
     c->frags[slot_idx].id = frag_id;
     c->frags[slot_idx].timestamp = now;
     c->frags[slot_idx].off = fragoff;
@@ -1357,10 +1361,10 @@ static void handle_data(sdwan_client_t *c, const uint8_t *pkt, int pktlen)
     if (n > 0) c->tun_tx++;
 }
 
-static void handle_echo_resp(sdwan_client_t *c, const uint8_t *pkt, int pktlen)
+static int handle_echo_resp(sdwan_client_t *c, const uint8_t *pkt, int pktlen)
 {
-    if (c->state != STATE_ESTABLISHED) return;
-    if (!pkt_verify(pkt, pktlen)) return;
+    if (c->state != STATE_ESTABLISHED) return 0;
+    if (!pkt_verify(pkt, pktlen)) return 0;
 
     /* Calculate delay from timestamp in echo response */
     uint64_t now = mono_usecs();
@@ -1372,15 +1376,17 @@ static void handle_echo_resp(sdwan_client_t *c, const uint8_t *pkt, int pktlen)
         if (delay > c->max_delay) c->max_delay = delay;
         if (delay < c->min_delay) c->min_delay = delay;
     }
+    return 1;
 }
 
-static void handle_close(sdwan_client_t *c, const uint8_t *pkt, int pktlen)
+static int handle_close(sdwan_client_t *c, const uint8_t *pkt, int pktlen)
 {
-    if (c->state != STATE_ESTABLISHED) return;
-    if (!pkt_verify(pkt, pktlen)) return;
+    if (c->state != STATE_ESTABLISHED) return 0;
+    if (!pkt_verify(pkt, pktlen)) return 0;
 
     log_msg("peer CLOSED\n");
     c->state = STATE_CLOSED;
+    return 1;
 }
 
 static void handle_openrej(sdwan_client_t *c, const uint8_t *pkt, int pktlen)
@@ -1468,31 +1474,36 @@ static void handle_recv(sdwan_client_t *c, const uint8_t *pkt, int pktlen)
         return;
     }
 
+    int accepted = 0;
     switch (pkt_type) {
     case PKT_OPENACK:
-        handle_openack(c, pkt, pktlen);
+        accepted = handle_openack(c, pkt, pktlen);
         break;
     case PKT_OPENREJ:
         handle_openrej(c, pkt, pktlen);
+        accepted = 1; /* no signature to verify */
         break;
     case PKT_ECHORESP:
-        handle_echo_resp(c, pkt, pktlen);
+        accepted = handle_echo_resp(c, pkt, pktlen);
         break;
     case PKT_CLOSE:
-        handle_close(c, pkt, pktlen);
+        accepted = handle_close(c, pkt, pktlen);
         break;
     case PKT_IPFRAG:
         handle_ipfrag(c, pkt, pktlen);
+        accepted = 1; /* fragments don't have signatures */
         break;
     case PKT_SEGRT:
         handle_segrt(c, pkt, pktlen);
+        accepted = 1;
         break;
     default:
         return; /* unknown type — don't update liveness */
     }
 
-    /* Update liveness only after successful dispatch */
-    c->last_recv_time = mono_secs();
+    /* Update liveness only after successful validation */
+    if (accepted)
+        c->last_recv_time = mono_secs();
 }
 
 /* ──────────────────────────────────────────────────────────
@@ -1722,7 +1733,7 @@ static void daemonize(void)
     if (pid > 0) exit(0);
     setsid();
     chdir("/");
-    umask(0);
+    umask(077);
     int fd = open("/dev/null", O_RDWR);
     if (fd >= 0) {
         dup2(fd, STDIN_FILENO);

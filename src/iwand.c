@@ -1265,7 +1265,7 @@ static int handle_ipfrag(sdwan_client_t *c, const uint8_t *pkt, int pktlen)
     uint32_t now = mono_secs();
 
     /* Search for existing slot with matching id */
-    int found = 0;
+    int found = 0; /* 0=not found, 1=accepted, -1=dropped */
     for (int i = 0; i < FRAG_SLOTS; i++) {
         if (!c->frags[i].in_use || c->frags[i].id != frag_id) continue;
 
@@ -1280,7 +1280,10 @@ static int handle_ipfrag(sdwan_client_t *c, const uint8_t *pkt, int pktlen)
         if (eop == 0) {
             /* Not last fragment: new data first, then accumulated */
             total_len = c->frags[i].len + fraglen;
-            if (total_len > (int)sizeof(g_frag_content)) { found = 1; break; }
+            if (total_len > (int)sizeof(g_frag_content)) {
+                c->frags[i].in_use = 0;
+                found = -1; break;
+            }
             memset(g_frag_content, 0, sizeof(g_frag_content));
             memcpy(g_frag_content, frag_data, fraglen);
             memcpy(g_frag_content + fraglen, c->frags[i].buf, c->frags[i].len);
@@ -1289,7 +1292,10 @@ static int handle_ipfrag(sdwan_client_t *c, const uint8_t *pkt, int pktlen)
             total_len = fragoff + fraglen;
             if (total_len < (int)c->frags[i].len)
                 total_len = c->frags[i].len;
-            if (total_len > (int)sizeof(g_frag_content)) { found = 1; break; }
+            if (total_len > (int)sizeof(g_frag_content)) {
+                c->frags[i].in_use = 0;
+                found = -1; break;
+            }
             memset(g_frag_content, 0, sizeof(g_frag_content));
             if (c->frags[i].len <= (int)sizeof(g_frag_content))
                 memcpy(g_frag_content, c->frags[i].buf, c->frags[i].len);
@@ -1313,13 +1319,14 @@ static int handle_ipfrag(sdwan_client_t *c, const uint8_t *pkt, int pktlen)
             } else {
                 /* Accumulated data exceeds slot buffer — drop reassembly */
                 c->frags[i].in_use = 0;
+                found = -1; break;
             }
         }
         found = 1;
         break;
     }
 
-    if (found) return 1;
+    if (found) return (found > 0) ? 1 : 0;
 
     /* No matching slot — find an empty or expired one */
     int slot_idx = -1;

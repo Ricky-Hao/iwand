@@ -11,52 +11,54 @@ jobs:
   build:
     runs-on: ubuntu-latest
     strategy:
+      fail-fast: false
       matrix:
         include:
           - arch: x86_64
-            musl_target: x86_64-linux-musl
+            cc: gcc
+            strip: strip
+            apt_packages: musl-tools
+            setup: ""
           - arch: aarch64
-            musl_target: aarch64-linux-musl
-          - arch: armv7l
-            musl_target: armv7l-linux-musleabihf
+            cc: aarch64-linux-gnu-gcc
+            strip: aarch64-linux-gnu-strip
+            apt_packages: gcc-aarch64-linux-gnu
+            setup: ""
+          - arch: armv7
+            cc: arm-linux-gnueabihf-gcc
+            strip: arm-linux-gnueabihf-strip
+            apt_packages: gcc-arm-linux-gnueabihf
+            setup: ""
           - arch: mipsel
-            musl_target: mipsel-linux-musl
+            cc: mipsel-linux-gnu-gcc
+            strip: mipsel-linux-gnu-strip
+            apt_packages: gcc-mipsel-linux-gnu
+            setup: ""
           - arch: mips
-            musl_target: mips-linux-musl
+            cc: mips-linux-gnu-gcc
+            strip: mips-linux-gnu-strip
+            apt_packages: gcc-mips-linux-gnu
+            setup: ""
 
     steps:
       - uses: actions/checkout@v4
 
-      - name: Cache musl cross-compiler
-        id: cache-toolchain
-        uses: actions/cache@v4
-        with:
-          path: ${{ matrix.musl_target }}-cross
-          key: musl-${{ matrix.musl_target }}-cross
-
-      - name: Download musl cross-compiler
-        if: steps.cache-toolchain.outputs.cache-hit != 'true'
+      - name: Install cross-compiler
         run: |
-          TOOLCHAIN="${{ matrix.musl_target }}-cross"
-          for url in \
-            "https://more.musl.cc/11/x86_64-linux-musl/${TOOLCHAIN}.tgz" \
-            "https://musl.cc/${TOOLCHAIN}.tgz"; do
-            echo "Trying $url ..."
-            if curl -fsSL --connect-timeout 30 --max-time 300 "$url" -o toolchain.tgz; then
-              tar xzf toolchain.tgz
-              rm toolchain.tgz
-              break
-            fi
-          done
-          test -d "${TOOLCHAIN}" || { echo "Failed to download toolchain"; exit 1; }
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq ${{ matrix.apt_packages }}
 
       - name: Build
         run: |
-          export PATH="$PWD/${{ matrix.musl_target }}-cross/bin:$PATH"
-          CC="${{ matrix.musl_target }}-gcc" \
-          STRIP="${{ matrix.musl_target }}-strip" \
-          CFLAGS="-O2 -Wall -Wextra -Wno-unused-parameter" \
-          make static
+          ${{ matrix.setup }}
+          if [ "${{ matrix.arch }}" = "x86_64" ]; then
+            CC="musl-gcc" make static
+          else
+            CC="${{ matrix.cc }}" STRIP="${{ matrix.strip }}" \
+            CFLAGS="-O2 -Wall -Wextra -Wno-unused-parameter" \
+            LDFLAGS="-static" make all
+            ${{ matrix.strip }} iwand
+          fi
           file iwand
 
       - name: Upload artifact

@@ -1311,6 +1311,9 @@ static void handle_ipfrag(sdwan_client_t *c, const uint8_t *pkt, int pktlen)
             if (total_len <= FRAG_BUF_SIZE) {
                 memcpy(c->frags[i].buf, g_frag_content, total_len);
                 c->frags[i].len = total_len;
+            } else {
+                /* Accumulated data exceeds slot buffer — drop reassembly */
+                c->frags[i].in_use = 0;
             }
         }
         found = 1;
@@ -1448,11 +1451,9 @@ static void handle_segrt(sdwan_client_t *c, const uint8_t *pkt, int pktlen)
     int data_len = inner_len - HDR_SIZE;
     memcpy(decrypt_buf, data_start, data_len);
 
-    /* Apply XOR decryption if inner packet is DATA_ENC */
-    if (inner[0] == PKT_DATA_ENC)
-        xor_encrypt(c->xor_key, decrypt_buf, data_len);
-
-    /* SR decrypt if SR encryption is configured */
+    /* SR decrypt FIRST (AES layer), then XOR.
+     * Wire order is: plaintext → XOR → AES → send
+     * So receive must be: AES⁻¹ → strip pad → XOR⁻¹ */
     if (g_cfg.sr_count > 0 && g_cfg.sr_encrypt_mode > 0) {
         uint8_t encrypt_algo = base[2] & 0x7;
         if (encrypt_algo == g_cfg.sr_encrypt_mode) {
@@ -1462,8 +1463,14 @@ static void handle_segrt(sdwan_client_t *c, const uint8_t *pkt, int pktlen)
             uint8_t padlen = (base[2] >> 3) & 0x1f;
             if (padlen > 0 && padlen < data_len)
                 data_len -= padlen;
+        } else if (encrypt_algo != 0) {
+            return; /* algorithm mismatch — drop rather than forward ciphertext */
         }
     }
+
+    /* Apply XOR decryption AFTER AES if inner packet is DATA_ENC */
+    if (inner[0] == PKT_DATA_ENC)
+        xor_encrypt(c->xor_key, decrypt_buf, data_len);
 
     /* Write decrypted data to TUN */
     write(c->tun_fd, decrypt_buf, data_len);

@@ -1,0 +1,17 @@
+# Panabit iWAN SD-WAN Client Configuration
+#
+# The section header [name] sets the TUN interface name.
+# All fields are required unless noted otherwise.
+
+[iwan0]
+server=10.0.0.1
+username=myuser
+password=mypassword
+port=4567
+mtu=1400
+encrypt=0
+
+# Optional: segment routing (multi-hop only)
+# srlinks=1000001,1000002
+# srpassword=secret
+# srencryptmode=1

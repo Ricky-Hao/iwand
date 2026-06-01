@@ -9,10 +9,10 @@ PROG=/usr/sbin/iwand
 CONF_DIR=/var/run/iwand
 CONF_FILE="$CONF_DIR/iwan.conf"
 
-# Reject values containing newlines, brackets, equals, comments, or control characters
+# Reject values containing newlines, brackets, or control characters
 validate_value() {
 	case "$1" in
-		*[[:cntrl:]]* | *'['* | *']'* | *'='* | *'#'*) return 1 ;;
+		*[[:cntrl:]]* | *'['* | *']'*) return 1 ;;
 	esac
 	return 0
 }
@@ -52,18 +52,12 @@ generate_config() {
 
 	install -d -m 0700 "$CONF_DIR"
 
-	# Write config with restricted permissions
+	# Write config with restricted permissions (printf avoids shell expansion in values)
 	(
 		umask 077
-		cat > "$CONF_FILE" <<-EOF
-			[$interface]
-			server=$server
-			username=$username
-			password=$password
-			port=$port
-			mtu=$mtu
-			encrypt=$encrypt
-		EOF
+		printf '[%s]\nserver=%s\nusername=%s\npassword=%s\nport=%s\nmtu=%s\nencrypt=%s\n' \
+			"$interface" "$server" "$username" "$password" "$port" "$mtu" "$encrypt" \
+			> "$CONF_FILE"
 	)
 
 	[ "$pipeid" -gt 0 ] 2>/dev/null && echo "pipeid=$pipeid" >> "$CONF_FILE"

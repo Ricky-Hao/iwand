@@ -1236,10 +1236,10 @@ static int handle_openack(sdwan_client_t *c, const uint8_t *pkt, int pktlen)
  *    [24:…]  fragment data (fraglen bytes)
  * ────────────────────────────────────────────────────────── */
 
-static void handle_ipfrag(sdwan_client_t *c, const uint8_t *pkt, int pktlen)
+static int handle_ipfrag(sdwan_client_t *c, const uint8_t *pkt, int pktlen)
 {
-    if (c->state != STATE_ESTABLISHED) return;
-    if (pktlen < HDR_SIZE + ETHPKT_SIZE) return;
+    if (c->state != STATE_ESTABLISHED) return 0;
+    if (pktlen < HDR_SIZE + ETHPKT_SIZE) return 0;
 
     const uint8_t *ethpkt = pkt + HDR_SIZE;
 
@@ -1257,8 +1257,8 @@ static void handle_ipfrag(sdwan_client_t *c, const uint8_t *pkt, int pktlen)
     int fraglen = (bf >> 15) & 0x7ff;
 
     /* Validate total packet length */
-    if (pktlen != fraglen + HDR_SIZE + ETHPKT_SIZE) return;
-    if (fraglen == 0) return;
+    if (pktlen != fraglen + HDR_SIZE + ETHPKT_SIZE) return 0;
+    if (fraglen == 0) return 0;
 
     const uint8_t *frag_data = pkt + HDR_SIZE + ETHPKT_SIZE;
 
@@ -1319,7 +1319,7 @@ static void handle_ipfrag(sdwan_client_t *c, const uint8_t *pkt, int pktlen)
         break;
     }
 
-    if (found) return;
+    if (found) return 1;
 
     /* No matching slot — find an empty or expired one */
     int slot_idx = -1;
@@ -1329,7 +1329,7 @@ static void handle_ipfrag(sdwan_client_t *c, const uint8_t *pkt, int pktlen)
             break;
         }
     }
-    if (slot_idx < 0) return;
+    if (slot_idx < 0) return 0;
 
     /* Initialize new slot */
     c->frags[slot_idx].in_use = 1;
@@ -1339,6 +1339,7 @@ static void handle_ipfrag(sdwan_client_t *c, const uint8_t *pkt, int pktlen)
     c->frags[slot_idx].len = fraglen;
     if (fraglen <= FRAG_BUF_SIZE)
         memcpy(c->frags[slot_idx].buf, frag_data, fraglen);
+    return 1;
 }
 
 /* ──────────────────────────────────────────────────────────
@@ -1414,41 +1415,41 @@ static void handle_openrej(sdwan_client_t *c, const uint8_t *pkt, int pktlen)
  *  Then: the inner payload (DATA or IPFRAG)
  * ────────────────────────────────────────────────────────── */
 
-static void handle_segrt(sdwan_client_t *c, const uint8_t *pkt, int pktlen)
+static int handle_segrt(sdwan_client_t *c, const uint8_t *pkt, int pktlen)
 {
-    if (c->state != STATE_ESTABLISHED) return;
+    if (c->state != STATE_ESTABLISHED) return 0;
 
     const uint8_t *base = pkt + HDR_SIZE; /* point past sdwan header */
-    if (pktlen < HDR_SIZE + 4) return;    /* need at least srhdr */
+    if (pktlen < HDR_SIZE + 4) return 0;    /* need at least srhdr */
 
     /* Parse SR header */
     uint8_t linkcnt = base[1];
     int sr_hdr_len = linkcnt * 4 + 4; /* 4 bytes header + 4 bytes per link */
 
-    if (pktlen < HDR_SIZE + sr_hdr_len) return;
+    if (pktlen < HDR_SIZE + sr_hdr_len) return 0;
 
     const uint8_t *inner = pkt + HDR_SIZE + sr_hdr_len;
     int inner_len = pktlen - HDR_SIZE - sr_hdr_len;
 
-    if (inner_len <= 0) return;
+    if (inner_len <= 0) return 0;
 
     /* SR AES decrypt the entire inner payload BEFORE type dispatch.
      * This covers both DATA and IPFRAG inner packets. */
     uint8_t decrypt_buf[MAX_PKT_SIZE];
-    if (inner_len > (int)sizeof(decrypt_buf)) return;
+    if (inner_len > (int)sizeof(decrypt_buf)) return 0;
     memcpy(decrypt_buf, inner, inner_len);
 
     if (g_cfg.sr_count > 0 && g_cfg.sr_encrypt_mode > 0) {
         uint8_t encrypt_algo = base[2] & 0x7;
         if (encrypt_algo == g_cfg.sr_encrypt_mode) {
             if (sr_decrypt(c, decrypt_buf, inner_len, base) < 0)
-                return; /* drop packet if decryption fails */
+                return 0; /* drop packet if decryption fails */
             /* Remove padding from the end */
             uint8_t padlen = (base[2] >> 3) & 0x1f;
             if (padlen > 0 && padlen < inner_len)
                 inner_len -= padlen;
         } else if (encrypt_algo != 0) {
-            return; /* algorithm mismatch — drop rather than forward ciphertext */
+            return 0; /* algorithm mismatch — drop rather than forward ciphertext */
         }
     }
 
@@ -1456,11 +1457,11 @@ static void handle_segrt(sdwan_client_t *c, const uint8_t *pkt, int pktlen)
     if (decrypt_buf[0] == PKT_IPFRAG_SR) {
         /* IPFRAG in SR context — pass decrypted inner to handler */
         handle_ipfrag(c, decrypt_buf, inner_len);
-        return;
+        return 1;
     }
 
     /* DATA: skip inner sdwan header */
-    if (inner_len <= HDR_SIZE) return;
+    if (inner_len <= HDR_SIZE) return 0;
     uint8_t *data_start = decrypt_buf + HDR_SIZE;
     int data_len = inner_len - HDR_SIZE;
 
@@ -1471,6 +1472,7 @@ static void handle_segrt(sdwan_client_t *c, const uint8_t *pkt, int pktlen)
     /* Write decrypted data to TUN */
     write(c->tun_fd, data_start, data_len);
     c->tun_tx++;
+    return 1;
 }
 
 static void handle_recv(sdwan_client_t *c, const uint8_t *pkt, int pktlen)
@@ -1505,12 +1507,10 @@ static void handle_recv(sdwan_client_t *c, const uint8_t *pkt, int pktlen)
         accepted = handle_close(c, pkt, pktlen);
         break;
     case PKT_IPFRAG:
-        handle_ipfrag(c, pkt, pktlen);
-        accepted = 1; /* fragments don't have signatures */
+        accepted = handle_ipfrag(c, pkt, pktlen);
         break;
     case PKT_SEGRT:
-        handle_segrt(c, pkt, pktlen);
-        accepted = 1;
+        accepted = handle_segrt(c, pkt, pktlen);
         break;
     default:
         return; /* unknown type — don't update liveness */

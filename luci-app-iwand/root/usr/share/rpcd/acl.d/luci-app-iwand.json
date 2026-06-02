@@ -8,7 +8,10 @@
 			}
 		},
 		"write": {
-			"uci": [ "iwand" ]
+			"uci": [ "iwand" ],
+			"ubus": {
+				"luci": [ "setInitAction" ]
+			}
 		}
 	}
 }

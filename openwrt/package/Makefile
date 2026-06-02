@@ -57,12 +57,14 @@ endef
 
 define Package/iwand/postinst
 #!/bin/sh
+[ -n "$$IPKG_INSTROOT" ] && exit 0
 [ -x /etc/init.d/iwand ] && /etc/init.d/iwand enable 2>/dev/null
 exit 0
 endef
 
 define Package/iwand/prerm
 #!/bin/sh
+[ -n "$$IPKG_INSTROOT" ] && exit 0
 /etc/init.d/iwand stop 2>/dev/null
 /etc/init.d/iwand disable 2>/dev/null
 rm -f /etc/rc.d/S99iwand /etc/rc.d/K10iwand 2>/dev/null

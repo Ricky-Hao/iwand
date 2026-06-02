@@ -50,7 +50,8 @@ generate_config() {
 	validate_value "$username" || { echo "invalid username" >&2; return 2; }
 	validate_value "$password" || { echo "invalid password" >&2; return 2; }
 
-	install -d -m 0700 "$CONF_DIR"
+	mkdir -p "$CONF_DIR"
+	chmod 0700 "$CONF_DIR"
 
 	# Write config with restricted permissions (printf avoids shell expansion in values)
 	(

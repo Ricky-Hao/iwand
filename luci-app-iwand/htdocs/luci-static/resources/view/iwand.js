@@ -3,6 +3,7 @@
 'require form';
 'require uci';
 'require rpc';
+'require ui';
 'require poll';
 
 var callServiceList = rpc.declare({
@@ -10,6 +11,13 @@ var callServiceList = rpc.declare({
 	method: 'list',
 	params: ['name'],
 	expect: { '': {} }
+});
+
+var callInitAction = rpc.declare({
+	object: 'luci',
+	method: 'setInitAction',
+	params: ['name', 'action'],
+	expect: { result: false }
 });
 
 function getServiceStatus() {
@@ -124,5 +132,13 @@ return view.extend({
 		}, 5);
 
 		return m.render();
+	},
+
+	handleSaveApply: function (ev, mode) {
+		return this.handleSave(ev).then(function () {
+			return ui.changes.apply(mode == '0');
+		}).then(function () {
+			return callInitAction('iwand', 'restart').catch(function () {});
+		});
 	}
 });

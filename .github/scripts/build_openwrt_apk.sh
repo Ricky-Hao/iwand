@@ -94,6 +94,17 @@ exit 0
 POSTEOF
 chmod 755 "$POSTINST"
 
+# Pre-deinstall script: stop and disable service
+PRERM=$(mktemp)
+cat > "$PRERM" << 'PRERMEOF'
+#!/bin/sh
+/etc/init.d/iwand stop 2>/dev/null
+/etc/init.d/iwand disable 2>/dev/null
+rm -f /etc/rc.d/S99iwand /etc/rc.d/K10iwand 2>/dev/null
+exit 0
+PRERMEOF
+chmod 755 "$PRERM"
+
 # Build APK
 apk --root "$APK_ROOT_DIR" mkpkg \
   --info "name:iwand" \
@@ -107,9 +118,10 @@ apk --root "$APK_ROOT_DIR" mkpkg \
   --info "depends:kmod-tun" \
   --info "provider-priority:100" \
   --script "post-install:${POSTINST}" \
+  --script "pre-deinstall:${PRERM}" \
   --files "$ROOT_DIR" \
   --output "$OUTPUT_PATH"
 
-rm -f "$POSTINST"
+rm -f "$POSTINST" "$PRERM"
 
 echo "Built APK: $OUTPUT_PATH (arch: $ARCHITECTURE, version: $APK_VERSION)"

@@ -61,4 +61,12 @@ define Package/iwand/postinst
 exit 0
 endef
 
+define Package/iwand/prerm
+#!/bin/sh
+/etc/init.d/iwand stop 2>/dev/null
+/etc/init.d/iwand disable 2>/dev/null
+rm -f /etc/rc.d/S99iwand /etc/rc.d/K10iwand 2>/dev/null
+exit 0
+endef
+
 $(eval $(call BuildPackage,iwand))

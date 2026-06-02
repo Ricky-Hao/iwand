@@ -74,9 +74,16 @@ generate_config() {
 start_service() {
 	generate_config
 	local ret=$?
-	# ret=1 means disabled (not an error), ret=2 means config error
-	[ "$ret" = "1" ] && return 0
+	# ret=1 means disabled, ret=2 means config error
+	if [ "$ret" = "1" ]; then
+		# Sync boot state: disabled in UCI → disable autostart
+		[ -L "/etc/rc.d/S${START}iwand" ] && rm -f "/etc/rc.d/S${START}iwand"
+		return 0
+	fi
 	[ "$ret" != "0" ] && return 1
+
+	# Sync boot state: enabled in UCI → enable autostart
+	[ -L "/etc/rc.d/S${START}iwand" ] || ln -s ../init.d/iwand "/etc/rc.d/S${START}iwand"
 
 	[ -e /dev/net/tun ] || {
 		mkdir -p /dev/net

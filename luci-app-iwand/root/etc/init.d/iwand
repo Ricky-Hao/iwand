@@ -97,7 +97,6 @@ stop_service() {
 }
 
 service_triggers() {
-	procd_add_reload_trigger "iwand"
 	procd_add_validation validate_config
 }
 

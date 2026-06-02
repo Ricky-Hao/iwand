@@ -3,7 +3,6 @@
 'require form';
 'require uci';
 'require rpc';
-'require fs';
 'require poll';
 
 var callServiceList = rpc.declare({
@@ -125,13 +124,5 @@ return view.extend({
 		}, 5);
 
 		return m.render();
-	},
-
-	handleSaveApply: function (ev, mode) {
-		return this.handleSave(ev)
-			.then(L.bind(this.map.handleApply, this.map))
-			.then(function () {
-				return fs.exec('/etc/init.d/iwand', ['restart']).catch(function () {});
-			});
 	}
 });

@@ -8,10 +8,7 @@
 			}
 		},
 		"write": {
-			"uci": [ "iwand" ],
-			"file": {
-				"/etc/init.d/iwand": [ "exec" ]
-			}
+			"uci": [ "iwand" ]
 		}
 	}
 }

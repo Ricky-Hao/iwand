@@ -55,4 +55,10 @@ define Package/iwand/install
 	chmod 0600 $(1)/etc/config/iwand
 endef
 
+define Package/iwand/postinst
+#!/bin/sh
+[ -x /etc/init.d/iwand ] && /etc/init.d/iwand enable 2>/dev/null
+exit 0
+endef
+
 $(eval $(call BuildPackage,iwand))

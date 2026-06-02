@@ -85,6 +85,15 @@ done < "$PACKAGES_DIR/.conffiles" > "$PACKAGES_DIR/.conffiles_static"
   | grep -v '^/lib/apk/packages/' \
   | sort > "$PACKAGES_DIR/.list"
 
+# Post-install script: enable service for procd trigger support
+POSTINST=$(mktemp)
+cat > "$POSTINST" << 'POSTEOF'
+#!/bin/sh
+[ -x /etc/init.d/iwand ] && /etc/init.d/iwand enable 2>/dev/null
+exit 0
+POSTEOF
+chmod 755 "$POSTINST"
+
 # Build APK
 apk --root "$APK_ROOT_DIR" mkpkg \
   --info "name:iwand" \
@@ -97,7 +106,10 @@ apk --root "$APK_ROOT_DIR" mkpkg \
   --info "maintainer:Ricky-Hao <14084342+Ricky-Hao@users.noreply.github.com>" \
   --info "depends:kmod-tun" \
   --info "provider-priority:100" \
+  --script "post-install:${POSTINST}" \
   --files "$ROOT_DIR" \
   --output "$OUTPUT_PATH"
+
+rm -f "$POSTINST"
 
 echo "Built APK: $OUTPUT_PATH (arch: $ARCHITECTURE, version: $APK_VERSION)"

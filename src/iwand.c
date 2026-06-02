@@ -1080,6 +1080,22 @@ static int send_to_server(iwan_client_t *c, const uint8_t *pkt, int len)
     return n;
 }
 
+/* Send CLOSE packet to server to properly disconnect */
+static void send_close(iwan_client_t *c)
+{
+    if (c->state != STATE_ESTABLISHED || c->udp_fd < 0) return;
+
+    uint8_t buf[HDR_SIZE + SIGN_SIZE];
+    buf[0] = PKT_CLOSE;
+    buf[1] = 0;
+    memcpy(buf + 2, &c->session_token, 2);
+    memcpy(buf + 4, &c->session_id, 4);
+    pkt_sign(buf);
+
+    send_to_server(c, buf, sizeof(buf));
+    log_msg("sent CLOSE to server\n");
+}
+
 /* ──────────────────────────────────────────────────────────
  *  Protocol: handle OPENACK
  * ────────────────────────────────────────────────────────── */
@@ -1608,6 +1624,7 @@ static void client_reset(iwan_client_t *c)
     if (c->state == STATE_ESTABLISHED || c->state == STATE_CLOSED) {
         log_msg("connection %s, resetting\n",
                 c->state == STATE_CLOSED ? "closed by peer" : "lost");
+        send_close(c);
         tun_clear_ip(g_cfg.tun_name);
         run_script(g_cfg.down_script, "down", c);
     }
@@ -1973,8 +1990,10 @@ int main(int argc, char *argv[])
 
     /* Cleanup */
     log_msg("shutting down\n");
-    if (g_clnt.state == STATE_ESTABLISHED)
+    if (g_clnt.state == STATE_ESTABLISHED) {
+        send_close(&g_clnt);
         run_script(g_cfg.down_script, "down", &g_clnt);
+    }
     if (g_clnt.udp_fd >= 0) close(g_clnt.udp_fd);
     if (g_clnt.tun_fd >= 0) close(g_clnt.tun_fd);
     log_deinit();

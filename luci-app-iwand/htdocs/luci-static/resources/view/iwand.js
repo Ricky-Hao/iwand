@@ -135,8 +135,11 @@ return view.extend({
 	},
 
 	handleSaveApply: function (ev, mode) {
+		var map = this.map;
 		return this.handleSave(ev).then(function () {
 			return ui.changes.apply(true);
+		}).then(function () {
+			return new Promise(function (resolve) { setTimeout(resolve, 1000); });
 		}).then(function () {
 			return callInitAction('iwand', 'restart').catch(function () {});
 		});

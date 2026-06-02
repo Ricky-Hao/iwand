@@ -131,7 +131,7 @@ return view.extend({
 		return this.handleSave(ev)
 			.then(L.bind(this.map.handleApply, this.map))
 			.then(function () {
-				return fs.exec('/etc/init.d/iwand', ['restart']);
+				return fs.exec('/etc/init.d/iwand', ['restart']).catch(function () {});
 			});
 	}
 });

@@ -128,10 +128,10 @@ return view.extend({
 	},
 
 	handleSaveApply: function (ev, mode) {
-		return this.handleSave(ev).then(function () {
-			return uci.apply();
-		}).then(function () {
-			return fs.exec('/etc/init.d/iwand', ['restart']);
-		});
+		return this.handleSave(ev)
+			.then(L.bind(this.map.handleApply, this.map))
+			.then(function () {
+				return fs.exec('/etc/init.d/iwand', ['restart']);
+			});
 	}
 });

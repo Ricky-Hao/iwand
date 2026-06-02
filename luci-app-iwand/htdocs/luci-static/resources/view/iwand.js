@@ -136,7 +136,7 @@ return view.extend({
 
 	handleSaveApply: function (ev, mode) {
 		return this.handleSave(ev).then(function () {
-			return ui.changes.apply(mode == '0');
+			return ui.changes.apply(true);
 		}).then(function () {
 			return callInitAction('iwand', 'restart').catch(function () {});
 		});

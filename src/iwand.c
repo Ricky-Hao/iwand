@@ -808,11 +808,13 @@ static int tun_open(const char *dev)
         return -1;
     }
 
+#ifdef TUNSTRANSIENT
     if (cloned) {
         int transient = 1;
         if (ioctl(fd, TUNSTRANSIENT, &transient) < 0)
             log_msg("TUNSTRANSIENT warning: %s\n", strerror(errno));
     }
+#endif
 
     char actual[IFNAMSIZ];
     if (freebsd_get_tun_name(fd, actual, sizeof(actual)) < 0) {

@@ -67,8 +67,32 @@ jobs:
           name: iwand-${{ matrix.arch }}
           path: iwand
 
+  freebsd:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build on FreeBSD amd64
+        uses: vmactions/freebsd-vm@v1
+        with:
+          release: "14.2"
+          run: |
+            make clean
+            make CC=cc CFLAGS="-O2 -Wall -Wextra -Wno-unused-parameter"
+            ./iwand -v
+            ./iwand -h
+            strip iwand
+            file iwand
+
+      - name: Upload FreeBSD artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: iwand-freebsd-amd64
+          path: iwand
+
   release:
-    needs: build
+    needs: [build, freebsd]
     if: startsWith(github.ref, 'refs/tags/v')
     runs-on: ubuntu-latest
     permissions:

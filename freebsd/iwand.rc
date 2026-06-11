@@ -1,0 +1,22 @@
+#!/bin/sh
+
+# PROVIDE: iwand
+# REQUIRE: NETWORKING
+# KEYWORD: shutdown
+
+. /etc/rc.subr
+
+name="iwand"
+rcvar="iwand_enable"
+
+load_rc_config "$name"
+
+: ${iwand_enable:="NO"}
+: ${iwand_config:="/usr/local/etc/iwan/iwan.conf"}
+: ${iwand_flags:=""}
+
+command="/usr/local/sbin/iwand"
+command_args="-f ${iwand_config}"
+required_files="${iwand_config}"
+
+run_rc_command "$1"

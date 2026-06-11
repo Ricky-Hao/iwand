@@ -1,8 +1,8 @@
 # iwand
 
-Panabit iWAN SD-WAN client daemon for Linux/OpenWrt.
+Panabit iWAN SD-WAN client daemon for Linux/OpenWrt and FreeBSD.
 
-Reverse-engineered from the official `linux_sdwand_x86` binary (glibc-only) and reimplemented as a single-file C program with zero external dependencies. Compiles to a ~110KB static musl binary that runs on OpenWrt x86_64.
+Reverse-engineered from the official `linux_sdwand_x86` binary (glibc-only) and reimplemented as a single-file C program with zero external dependencies. Compiles to a ~110KB static musl binary that runs on OpenWrt x86_64, or a native FreeBSD amd64 binary.
 
 ## Building
 
@@ -11,11 +11,20 @@ make                        # dynamic build
 CC=musl-gcc make static     # static musl build (for OpenWrt)
 ```
 
+FreeBSD amd64:
+
+```sh
+make                        # native FreeBSD build with cc/clang
+make install-freebsd        # installs to /usr/local
+```
+
+Linux binaries do not run natively on FreeBSD; build on FreeBSD or in a FreeBSD VM.
+
 ## Usage
 
 ```
 iwand [options]
-  -f <file>   config file path [default: /etc/iwan/iwan.conf]
+  -f <file>   config file path [default: /etc/iwan/iwan.conf, /usr/local/etc/iwan/iwan.conf on FreeBSD]
   -l <file>   log to file instead of syslog
   -F           run in foreground (log to stderr)
   -v           print version
@@ -66,6 +75,25 @@ ssh root@router vi /etc/iwan/iwan.conf
 ssh root@router /etc/init.d/iwand enable
 ssh root@router /etc/init.d/iwand start
 ```
+
+## FreeBSD Deployment
+
+Load the tunnel driver and install the native amd64 build:
+
+```sh
+kldload if_tuntap
+make install-freebsd
+sysrc iwand_enable=YES
+service iwand start
+```
+
+The rc.d script reads `/usr/local/etc/iwan/iwan.conf` by default. To override it:
+
+```sh
+sysrc iwand_config=/path/to/iwan.conf
+```
+
+The section name in the config is still the requested TUN interface name, for example `[iwan0]`. On FreeBSD, iwand opens a cloned `tun(4)` device and tries to rename it to that name; if the rename is not permitted, it continues with the kernel-assigned `tunN` name and passes that name to hook scripts.
 
 ## Protocol
 

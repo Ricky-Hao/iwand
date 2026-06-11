@@ -2,7 +2,7 @@
 
 Panabit iWAN SD-WAN client daemon for Linux/OpenWrt and FreeBSD.
 
-Reverse-engineered from the official `linux_sdwand_x86` binary (glibc-only) and reimplemented as a single-file C program with zero external dependencies. Compiles to a ~110KB static musl binary that runs on OpenWrt x86_64, or a native FreeBSD amd64 binary.
+Reverse-engineered from the official `linux_sdwand_x86` binary (glibc-only) and reimplemented as a small C program with zero external dependencies. Compiles to a ~110KB static musl binary that runs on OpenWrt x86_64, or a native FreeBSD amd64 binary.
 
 ## Building
 

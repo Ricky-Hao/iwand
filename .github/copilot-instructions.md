@@ -10,7 +10,7 @@ make clean
 
 ## Architecture
 
-Single-file C program (`src/iwand.c`, ~1600 lines). Single-threaded event loop using `poll()` on TUN fd + UDP fd with 1-second timeout driving the state machine timer.
+Core C program in `src/iwand.c`, with platform TUN backends in `src/tun_linux.c` and `src/tun_freebsd.c`. Single-threaded event loop using `poll()` on TUN fd + UDP fd with 1-second timeout driving the state machine timer.
 
 All crypto is self-contained (embedded MD5, AES-128 ECB encrypt/decrypt, XOR). No external library dependencies.
 

@@ -25,28 +25,12 @@
 #include <sys/time.h>
 #include <sys/wait.h>
 #include <sys/socket.h>
-#include <sys/ioctl.h>
 #include <netinet/in.h>
 #include <arpa/inet.h>
-#include <net/if.h>
-#if defined(__linux__)
-#  ifdef __has_include
-#    if __has_include(<linux/if_tun.h>)
-#      include <linux/if_tun.h>
-#    endif
-#  endif
-#  ifndef TUNSETIFF
-#    include <sys/ioctl.h>
-#    define TUNSETIFF     _IOW('T', 202, int)
-#    define IFF_TUN       0x0001
-#    define IFF_NO_PI     0x1000
-#  endif
-#elif defined(__FreeBSD__)
-#  include <sys/sockio.h>
-#  include <net/if_tun.h>
-#endif
 #include <netdb.h>
 #include <stdarg.h>
+
+#include "tun.h"
 
 /* ── Packet types ───────────────────────────────────────── */
 #define PKT_OPENREJ   0x11
@@ -668,332 +652,6 @@ static void log_deinit(void)
 }
 
 /* ──────────────────────────────────────────────────────────
- *  TUN interface
- * ────────────────────────────────────────────────────────── */
-
-#ifdef __FreeBSD__
-static void freebsd_sockaddr_in(struct sockaddr_in *addr, uint32_t ip)
-{
-    memset(addr, 0, sizeof(*addr));
-    addr->sin_len = sizeof(*addr);
-    addr->sin_family = AF_INET;
-    addr->sin_addr.s_addr = ip;
-}
-
-static int freebsd_is_tun_unit(const char *dev)
-{
-    const char *p;
-
-    if (strncmp(dev, "tun", 3) != 0)
-        return 0;
-    p = dev + 3;
-    if (*p == '\0')
-        return 0;
-    while (*p) {
-        if (*p < '0' || *p > '9')
-            return 0;
-        p++;
-    }
-    return 1;
-}
-
-static int freebsd_open_tun_device(const char *dev, int *cloned)
-{
-    int fd;
-
-    *cloned = 0;
-    fd = open("/dev/tun", O_RDWR | O_CLOEXEC);
-    if (fd >= 0) {
-        *cloned = 1;
-        return fd;
-    }
-
-    if (freebsd_is_tun_unit(dev)) {
-        char path[sizeof("/dev/") + IFNAMSIZ];
-
-        snprintf(path, sizeof(path), "/dev/%s", dev);
-        fd = open(path, O_RDWR | O_CLOEXEC);
-        if (fd >= 0)
-            return fd;
-        log_msg("open %s failed: %s\n", path, strerror(errno));
-    } else {
-        log_msg("open /dev/tun failed: %s\n", strerror(errno));
-    }
-
-    return -1;
-}
-
-static int freebsd_get_tun_name(int fd, char *name, size_t name_len)
-{
-    struct ifreq ifr;
-
-    memset(&ifr, 0, sizeof(ifr));
-    if (ioctl(fd, TUNGIFNAME, &ifr) < 0) {
-        log_msg("TUNGIFNAME failed: %s\n", strerror(errno));
-        return -1;
-    }
-    snprintf(name, name_len, "%.*s", IFNAMSIZ - 1, ifr.ifr_name);
-    return 0;
-}
-
-static int freebsd_rename_tun(const char *old_name, const char *new_name, int *saved_errno)
-{
-    int sockfd;
-    struct ifreq ifr;
-    char new_name_buf[IFNAMSIZ];
-    int ret;
-
-    if (strcmp(old_name, new_name) == 0)
-        return 0;
-
-    sockfd = socket(AF_INET, SOCK_DGRAM | SOCK_CLOEXEC, 0);
-    if (sockfd < 0) {
-        *saved_errno = errno;
-        return -1;
-    }
-
-    memset(&ifr, 0, sizeof(ifr));
-    snprintf(ifr.ifr_name, sizeof(ifr.ifr_name), "%s", old_name);
-    snprintf(new_name_buf, sizeof(new_name_buf), "%s", new_name);
-    ifr.ifr_data = (caddr_t)new_name_buf;
-
-    ret = ioctl(sockfd, SIOCSIFNAME, &ifr);
-    if (ret < 0)
-        *saved_errno = errno;
-    close(sockfd);
-    return ret;
-}
-#endif
-
-static int tun_open(const char *dev)
-{
-#if defined(__linux__)
-    int fd = open("/dev/net/tun", O_RDWR | O_CLOEXEC);
-    if (fd < 0) {
-        log_msg("open /dev/net/tun failed: %s\n", strerror(errno));
-        return -1;
-    }
-    struct ifreq ifr;
-    memset(&ifr, 0, sizeof(ifr));
-    ifr.ifr_flags = IFF_TUN | IFF_NO_PI;
-    snprintf(ifr.ifr_name, IFNAMSIZ, "%s", dev);
-    if (ioctl(fd, TUNSETIFF, &ifr) < 0) {
-        log_msg("TUNSETIFF failed: %s\n", strerror(errno));
-        close(fd);
-        return -1;
-    }
-    return fd;
-#elif defined(__FreeBSD__)
-    int cloned;
-    int fd = freebsd_open_tun_device(dev, &cloned);
-    if (fd < 0)
-        return -1;
-
-    int off = 0;
-    if (ioctl(fd, TUNSLMODE, &off) < 0) {
-        log_msg("TUNSLMODE off failed: %s\n", strerror(errno));
-        close(fd);
-        return -1;
-    }
-    if (ioctl(fd, TUNSIFHEAD, &off) < 0) {
-        log_msg("TUNSIFHEAD off failed: %s\n", strerror(errno));
-        close(fd);
-        return -1;
-    }
-
-    int mode = IFF_BROADCAST | IFF_MULTICAST;
-    if (ioctl(fd, TUNSIFMODE, &mode) < 0) {
-        log_msg("TUNSIFMODE failed: %s\n", strerror(errno));
-        close(fd);
-        return -1;
-    }
-
-#ifdef TUNSTRANSIENT
-    if (cloned) {
-        int transient = 1;
-        if (ioctl(fd, TUNSTRANSIENT, &transient) < 0)
-            log_msg("TUNSTRANSIENT warning: %s\n", strerror(errno));
-    }
-#endif
-
-    char actual[IFNAMSIZ];
-    if (freebsd_get_tun_name(fd, actual, sizeof(actual)) < 0) {
-        close(fd);
-        return -1;
-    }
-
-    if (strcmp(actual, dev) != 0) {
-        int rename_errno = 0;
-        if (freebsd_rename_tun(actual, dev, &rename_errno) == 0) {
-            log_msg("renamed FreeBSD TUN %s -> %s\n", actual, dev);
-        } else {
-            log_msg("rename FreeBSD TUN %s -> %s failed: %s; using %s\n",
-                    actual, dev, strerror(rename_errno), actual);
-            snprintf(g_cfg.tun_name, sizeof(g_cfg.tun_name), "%s", actual);
-        }
-    }
-
-    return fd;
-#else
-    (void)dev;
-    log_msg("TUN is unsupported on this platform\n");
-    return -1;
-#endif
-}
-
-static int tun_set_ip(const char *dev, uint32_t ip, uint32_t mask)
-{
-#if defined(__FreeBSD__)
-    int sockfd = socket(AF_INET, SOCK_DGRAM | SOCK_CLOEXEC, 0);
-    if (sockfd < 0) return -1;
-
-    struct ifaliasreq ifra;
-    memset(&ifra, 0, sizeof(ifra));
-    snprintf(ifra.ifra_name, sizeof(ifra.ifra_name), "%s", dev);
-
-    freebsd_sockaddr_in((struct sockaddr_in *)&ifra.ifra_addr, ip);
-    freebsd_sockaddr_in((struct sockaddr_in *)&ifra.ifra_mask, mask);
-
-    uint32_t ip_h = ntohl(ip);
-    uint32_t mask_h = ntohl(mask);
-    uint32_t broad = htonl((ip_h & mask_h) | ~mask_h);
-    freebsd_sockaddr_in((struct sockaddr_in *)&ifra.ifra_broadaddr, broad);
-
-    int ret = ioctl(sockfd, SIOCAIFADDR, &ifra);
-    int add_errno = errno;
-    if (ret < 0 && add_errno == EEXIST) {
-        struct ifreq del;
-
-        memset(&del, 0, sizeof(del));
-        snprintf(del.ifr_name, IFNAMSIZ, "%s", dev);
-        freebsd_sockaddr_in((struct sockaddr_in *)&del.ifr_addr, ip);
-        if (ioctl(sockfd, SIOCDIFADDR, &del) == 0) {
-            ret = ioctl(sockfd, SIOCAIFADDR, &ifra);
-            add_errno = errno;
-        }
-    }
-    if (ret < 0) {
-        log_msg("SIOCAIFADDR failed: %s\n", strerror(add_errno));
-        close(sockfd);
-        return -1;
-    }
-
-    struct ifreq ifr;
-    memset(&ifr, 0, sizeof(ifr));
-    snprintf(ifr.ifr_name, IFNAMSIZ, "%s", dev);
-    if (ioctl(sockfd, SIOCGIFFLAGS, &ifr) < 0) {
-        log_msg("SIOCGIFFLAGS failed: %s\n", strerror(errno));
-        close(sockfd);
-        return -1;
-    }
-    ifr.ifr_flags |= IFF_UP;
-    if (ioctl(sockfd, SIOCSIFFLAGS, &ifr) < 0) {
-        log_msg("SIOCSIFFLAGS UP failed: %s\n", strerror(errno));
-        close(sockfd);
-        return -1;
-    }
-
-    close(sockfd);
-    return 0;
-#else
-    int sockfd = socket(AF_INET, SOCK_DGRAM | SOCK_CLOEXEC, 0);
-    if (sockfd < 0) return -1;
-    struct ifreq ifr;
-    memset(&ifr, 0, sizeof(ifr));
-    snprintf(ifr.ifr_name, IFNAMSIZ, "%s", dev);
-
-    struct sockaddr_in *addr = (struct sockaddr_in *)&ifr.ifr_addr;
-    addr->sin_family = AF_INET;
-    addr->sin_addr.s_addr = ip;
-    if (ioctl(sockfd, SIOCSIFADDR, &ifr) < 0) {
-        log_msg("SIOCSIFADDR failed: %s\n", strerror(errno));
-        close(sockfd);
-        return -1;
-    }
-
-    addr->sin_addr.s_addr = mask;
-    if (ioctl(sockfd, SIOCSIFNETMASK, &ifr) < 0) {
-        log_msg("SIOCSIFNETMASK failed: %s\n", strerror(errno));
-        close(sockfd);
-        return -1;
-    }
-
-    /* Read existing flags and add IFF_UP */
-    if (ioctl(sockfd, SIOCGIFFLAGS, &ifr) < 0) {
-        log_msg("SIOCGIFFLAGS failed: %s\n", strerror(errno));
-        close(sockfd);
-        return -1;
-    }
-    ifr.ifr_flags |= IFF_UP | IFF_RUNNING;
-    if (ioctl(sockfd, SIOCSIFFLAGS, &ifr) < 0) {
-        log_msg("SIOCSIFFLAGS UP failed: %s\n", strerror(errno));
-        close(sockfd);
-        return -1;
-    }
-
-    close(sockfd);
-    return 0;
-#endif
-}
-
-static int tun_set_mtu(const char *dev, int mtu)
-{
-    int sockfd = socket(AF_INET, SOCK_DGRAM | SOCK_CLOEXEC, 0);
-    if (sockfd < 0) return -1;
-    struct ifreq ifr;
-    memset(&ifr, 0, sizeof(ifr));
-    snprintf(ifr.ifr_name, IFNAMSIZ, "%s", dev);
-    ifr.ifr_mtu = mtu;
-    int ret = ioctl(sockfd, SIOCSIFMTU, &ifr);
-    if (ret < 0)
-        log_msg("SIOCSIFMTU(%d) failed: %s\n", mtu, strerror(errno));
-    close(sockfd);
-    return ret;
-}
-
-static void tun_clear_ip(const char *dev)
-{
-#if defined(__FreeBSD__)
-    int sockfd = socket(AF_INET, SOCK_DGRAM | SOCK_CLOEXEC, 0);
-    if (sockfd < 0) return;
-    struct ifreq ifr;
-
-    memset(&ifr, 0, sizeof(ifr));
-    snprintf(ifr.ifr_name, IFNAMSIZ, "%s", dev);
-    if (ioctl(sockfd, SIOCGIFADDR, &ifr) == 0)
-        ioctl(sockfd, SIOCDIFADDR, &ifr);
-
-    memset(&ifr, 0, sizeof(ifr));
-    snprintf(ifr.ifr_name, IFNAMSIZ, "%s", dev);
-    if (ioctl(sockfd, SIOCGIFFLAGS, &ifr) == 0) {
-        ifr.ifr_flags &= ~IFF_UP;
-        ioctl(sockfd, SIOCSIFFLAGS, &ifr);
-    }
-    close(sockfd);
-#else
-    int sockfd = socket(AF_INET, SOCK_DGRAM | SOCK_CLOEXEC, 0);
-    if (sockfd < 0) return;
-    struct ifreq ifr;
-    memset(&ifr, 0, sizeof(ifr));
-    snprintf(ifr.ifr_name, IFNAMSIZ, "%s", dev);
-
-    /* Remove address */
-    struct sockaddr_in *addr = (struct sockaddr_in *)&ifr.ifr_addr;
-    addr->sin_family = AF_INET;
-    addr->sin_addr.s_addr = 0;
-    ioctl(sockfd, SIOCSIFADDR, &ifr);
-
-    /* Bring interface down */
-    memset(&ifr, 0, sizeof(ifr));
-    snprintf(ifr.ifr_name, IFNAMSIZ, "%s", dev);
-    ioctl(sockfd, SIOCGIFFLAGS, &ifr);
-    ifr.ifr_flags &= ~(IFF_UP | IFF_RUNNING);
-    ioctl(sockfd, SIOCSIFFLAGS, &ifr);
-    close(sockfd);
-#endif
-}
-
-/* ──────────────────────────────────────────────────────────
  *  UDP socket
  * ────────────────────────────────────────────────────────── */
 
@@ -1451,8 +1109,8 @@ static int handle_openack(iwan_client_t *c, const uint8_t *pkt, int pktlen)
 
     /* Set TUN IP and MTU — fail and reset if interface setup fails */
     uint32_t mask = htonl(0xffffff00); /* 255.255.255.0 */
-    if (tun_set_ip(g_cfg.tun_name, htonl(c->peer_ip), mask) < 0 ||
-        tun_set_mtu(g_cfg.tun_name, eff_mtu) < 0) {
+    if (tun_set_ip(g_cfg.tun_name, htonl(c->peer_ip), mask, log_msg) < 0 ||
+        tun_set_mtu(g_cfg.tun_name, eff_mtu, log_msg) < 0) {
         log_msg("OPENACK: TUN interface setup failed, resetting\n");
         c->state = STATE_CLOSED;
         return 0;
@@ -1854,7 +1512,7 @@ static void client_reset(iwan_client_t *c)
         log_msg("connection %s, resetting\n",
                 c->state == STATE_CLOSED ? "closed by peer" : "lost");
         send_close(c);
-        tun_clear_ip(g_cfg.tun_name);
+        tun_clear_ip(g_cfg.tun_name, log_msg);
         run_script(g_cfg.down_script, "down", c);
     }
 
@@ -2129,7 +1787,7 @@ int main(int argc, char *argv[])
     sigaction(SIGSEGV, &sa, NULL);
 
     /* Initialize TUN */
-    g_clnt.tun_fd = tun_open(g_cfg.tun_name);
+    g_clnt.tun_fd = tun_open(g_cfg.tun_name, sizeof(g_cfg.tun_name), log_msg);
     if (g_clnt.tun_fd < 0) {
         log_msg("TUN init failed\n");
         log_deinit();

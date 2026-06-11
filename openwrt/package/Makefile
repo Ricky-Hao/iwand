@@ -40,7 +40,9 @@ define Build/Compile
 		$(TARGET_CFLAGS) \
 		$(TARGET_LDFLAGS) \
 		-o $(PKG_BUILD_DIR)/iwand \
-		$(PKG_BUILD_DIR)/src/iwand.c
+		$(PKG_BUILD_DIR)/src/iwand.c \
+		$(PKG_BUILD_DIR)/src/tun_linux.c \
+		$(PKG_BUILD_DIR)/src/tun_freebsd.c
 endef
 
 define Package/iwand/install

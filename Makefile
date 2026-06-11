@@ -3,7 +3,7 @@ STRIP    ?= strip
 CFLAGS   ?= -O2 -Wall -Wextra -Wno-unused-parameter
 LDFLAGS  ?=
 TARGET   = iwand
-SRC      = src/iwand.c
+SRC      = src/iwand.c src/tun_linux.c src/tun_freebsd.c
 PREFIX   ?= /usr/local
 
 .PHONY: all static clean install install-freebsd

@@ -11,6 +11,12 @@ make                        # dynamic build
 CC=musl-gcc make static     # static musl build (for OpenWrt)
 ```
 
+Experimental Go iWAN server:
+
+```bash
+go build ./cmd/iwand-server
+```
+
 FreeBSD amd64:
 
 ```sh
@@ -48,6 +54,46 @@ port=4567
 mtu=1400         # 46-1600
 encrypt=0        # 0=off, 1=XOR encryption
 ```
+
+## Experimental Go Server
+
+This repository also includes a simple prototype server for the Go iWAN client in Ricky's sing-box fork. It is intended for local compatibility testing, not production SD-WAN deployment.
+
+Build and run:
+
+```bash
+go build -o iwand-server ./cmd/iwand-server
+./iwand-server -config server/config.example.json
+```
+
+The JSON config defaults to loopback when `listen` is omitted. Keep the default `127.0.0.1:4567` for local tests; binding to a public address should be treated as experimental and not production-grade.
+
+Example schema:
+
+```json
+{
+  "listen": "127.0.0.1:4567",
+  "mtu": 1400,
+  "dns": ["1.1.1.1", "8.8.8.8"],
+  "users": [
+    {
+      "username": "alice",
+      "password": "change-me-alice",
+      "address": "10.20.30.10",
+      "allow_encrypt": true
+    }
+  ]
+}
+```
+
+Supported server-side protocol subset:
+
+- OPEN / OPENACK / OPENREJ authentication with iWAN MD5 control signatures, TLV total-length parsing, and AES-128 password TLV verification.
+- ECHOREQ / ECHORESP and CLOSE with token/session/source validation.
+- DATA / DATA_ENC for simple local forwarding between connected configured users by IPv4 destination address; packets without a connected destination are echoed to the sender for smoke tests.
+- DATA_ENC XOR compatibility using `MD5(username + password)[0:8]`.
+
+Intentional limitations: no TUN device, no OS route management, no persistent sessions, no IP pool allocation, no IPFRAG reassembly, no segment routing, and no production hardening.
 
 ## OpenWrt Deployment
 

@@ -1,0 +1,19 @@
+{
+  "listen": "127.0.0.1:4567",
+  "mtu": 1400,
+  "dns": ["1.1.1.1", "8.8.8.8"],
+  "users": [
+    {
+      "username": "alice",
+      "password": "change-me-alice",
+      "address": "10.20.30.10",
+      "allow_encrypt": true
+    },
+    {
+      "username": "bob",
+      "password": "change-me-bob",
+      "address": "10.20.30.11",
+      "allow_encrypt": true
+    }
+  ]
+}

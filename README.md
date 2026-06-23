@@ -17,6 +17,16 @@ Experimental Go iWAN server:
 go build ./cmd/iwand-server
 ```
 
+Linux amd64 release artifact:
+
+```bash
+CGO_ENABLED=0 GOOS=linux GOARCH=amd64 \
+  go build -trimpath -ldflags="-s -w" \
+  -o iwand-server-linux-amd64 ./cmd/iwand-server
+```
+
+GitHub Actions `Build` runs on pushes/PRs, and tags matching `v*` create a release. Release uploads include the C client binaries plus the Go server artifact `iwand-server-linux-amd64` with `config.example.json`.
+
 FreeBSD amd64:
 
 ```sh

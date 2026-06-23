@@ -8,6 +8,40 @@ on:
     branches: [main]
 
 jobs:
+  go-server-linux-amd64:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Run Go tests
+        run: go test ./...
+
+      - name: Build Linux amd64 server
+        env:
+          CGO_ENABLED: "0"
+          GOOS: linux
+          GOARCH: amd64
+        run: |
+          mkdir -p dist/server
+          go build -trimpath -ldflags="-s -w" -o dist/server/iwand-server-linux-amd64 ./cmd/iwand-server
+          cp server/config.example.json dist/server/config.example.json
+          cp README.md dist/server/README.md
+          file dist/server/iwand-server-linux-amd64
+
+      - name: Upload Linux amd64 server artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: go-iwand-server-linux-amd64
+          path: dist/server/*
+          if-no-files-found: error
+
   build:
     runs-on: ubuntu-latest
     strategy:
@@ -92,7 +126,7 @@ jobs:
           path: iwand
 
   release:
-    needs: [build, freebsd]
+    needs: [build, freebsd, go-server-linux-amd64]
     if: startsWith(github.ref, 'refs/tags/v')
     runs-on: ubuntu-latest
     permissions:
@@ -108,9 +142,13 @@ jobs:
         run: |
           mkdir release
           for dir in artifacts/iwand-*; do
+            [ -f "$dir/iwand" ] || continue
             arch=$(basename "$dir" | sed 's/iwand-//')
             cp "$dir/iwand" "release/iwand-${arch}"
           done
+          if [ -d artifacts/go-iwand-server-linux-amd64 ]; then
+            cp artifacts/go-iwand-server-linux-amd64/* release/
+          fi
           ls -lh release/
 
       - name: Create release

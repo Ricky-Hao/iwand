@@ -11,16 +11,19 @@ import (
 )
 
 const (
-	DefaultListen = "127.0.0.1:4567"
-	DefaultMTU    = 1400
-	MinMTU        = 46
-	MaxMTU        = 1600
+	DefaultListen      = "127.0.0.1:4567"
+	DefaultMTU         = 1400
+	DefaultExitTUNName = "iwand0"
+	MinMTU             = 46
+	MaxMTU             = 1600
+	maxInterfaceName   = 15
 )
 
 type Config struct {
 	Listen string       `json:"listen"`
 	MTU    uint16       `json:"mtu"`
 	DNS    []string     `json:"dns"`
+	Exit   ExitConfig   `json:"exit,omitempty"`
 	Users  []UserConfig `json:"users"`
 }
 
@@ -31,11 +34,28 @@ type UserConfig struct {
 	AllowEncrypt *bool  `json:"allow_encrypt,omitempty"`
 }
 
+type ExitConfig struct {
+	Enabled      bool   `json:"enabled"`
+	TUNName      string `json:"tun_name"`
+	TUNAddress   string `json:"tun_address"`
+	MTU          uint16 `json:"mtu"`
+	StrictSource *bool  `json:"strict_source,omitempty"`
+}
+
 type normalizedConfig struct {
 	listen string
 	mtu    uint16
 	dns    []netip.Addr
+	exit   normalizedExitConfig
 	users  map[string]*configuredUser
+}
+
+type normalizedExitConfig struct {
+	enabled      bool
+	tunName      string
+	tunAddress   netip.Prefix
+	mtu          uint16
+	strictSource bool
 }
 
 type configuredUser struct {
@@ -83,6 +103,9 @@ func (c *Config) validate() error {
 	}
 	if c.MTU < MinMTU || c.MTU > MaxMTU {
 		return fmt.Errorf("invalid mtu %d, required %d-%d", c.MTU, MinMTU, MaxMTU)
+	}
+	if err := c.validateExit(); err != nil {
+		return err
 	}
 	if _, err := net.ResolveUDPAddr("udp", c.Listen); err != nil {
 		return fmt.Errorf("invalid listen address %q: %w", c.Listen, err)
@@ -137,14 +160,56 @@ func (c *Config) validate() error {
 	return nil
 }
 
+func (c *Config) validateExit() error {
+	if !c.Exit.Enabled {
+		return nil
+	}
+	if c.Exit.TUNName == "" {
+		c.Exit.TUNName = DefaultExitTUNName
+	}
+	if len(c.Exit.TUNName) > maxInterfaceName {
+		return fmt.Errorf("exit.tun_name %q exceeds Linux interface name limit of %d bytes", c.Exit.TUNName, maxInterfaceName)
+	}
+	if c.Exit.TUNAddress == "" {
+		return errors.New("exit.tun_address is required when exit.enabled is true")
+	}
+	prefix, err := netip.ParsePrefix(c.Exit.TUNAddress)
+	if err != nil {
+		return fmt.Errorf("exit.tun_address: %w", err)
+	}
+	if !prefix.Addr().Is4() || prefix.Addr().IsUnspecified() {
+		return errors.New("exit.tun_address must be a non-zero IPv4 prefix")
+	}
+	if c.Exit.MTU == 0 {
+		c.Exit.MTU = c.MTU
+	}
+	if c.Exit.MTU < MinMTU || c.Exit.MTU > MaxMTU {
+		return fmt.Errorf("invalid exit.mtu %d, required %d-%d", c.Exit.MTU, MinMTU, MaxMTU)
+	}
+	return nil
+}
+
 func (c Config) normalized() (normalizedConfig, error) {
 	if err := c.validate(); err != nil {
 		return normalizedConfig{}, err
 	}
+	strictSource := true
+	if c.Exit.StrictSource != nil {
+		strictSource = *c.Exit.StrictSource
+	}
 	config := normalizedConfig{
 		listen: c.Listen,
 		mtu:    c.MTU,
-		users:  make(map[string]*configuredUser, len(c.Users)),
+		exit: normalizedExitConfig{
+			enabled:      c.Exit.Enabled,
+			tunName:      c.Exit.TUNName,
+			mtu:          c.Exit.MTU,
+			strictSource: strictSource,
+		},
+		users: make(map[string]*configuredUser, len(c.Users)),
+	}
+	if c.Exit.Enabled {
+		config.exit.tunAddress = netip.MustParsePrefix(c.Exit.TUNAddress)
 	}
 	for _, rawDNS := range c.DNS {
 		config.dns = append(config.dns, netip.MustParseAddr(rawDNS))

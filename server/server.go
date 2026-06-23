@@ -16,6 +16,7 @@ import (
 type Server struct {
 	config normalizedConfig
 	logger *log.Logger
+	exit   packetDevice
 
 	access    sync.Mutex
 	sessions  map[sessionKey]*session
@@ -44,9 +45,20 @@ type outboundSession struct {
 	sessionID [4]byte
 	encrypt   bool
 	xorKey    [8]byte
+	address   netip.Addr
+}
+
+type packetDevice interface {
+	Read([]byte) (int, error)
+	Write([]byte) (int, error)
+	Close() error
 }
 
 func New(config Config, logger *log.Logger) (*Server, error) {
+	return newServer(config, logger, nil)
+}
+
+func newServer(config Config, logger *log.Logger, exitDevice packetDevice) (*Server, error) {
 	normalized, err := config.normalized()
 	if err != nil {
 		return nil, err
@@ -54,9 +66,20 @@ func New(config Config, logger *log.Logger) (*Server, error) {
 	if logger == nil {
 		logger = log.New(io.Discard, "", 0)
 	}
+	if normalized.exit.enabled {
+		if exitDevice == nil {
+			exitDevice, err = openPacketDevice(normalized.exit)
+			if err != nil {
+				return nil, err
+			}
+		}
+	} else {
+		exitDevice = nil
+	}
 	return &Server{
 		config:    normalized,
 		logger:    logger,
+		exit:      exitDevice,
 		sessions:  make(map[sessionKey]*session),
 		byAddress: make(map[netip.Addr]*session),
 	}, nil
@@ -81,6 +104,14 @@ func (s *Server) Serve(ctx context.Context, conn *net.UDPConn) error {
 		<-ctx.Done()
 		_ = conn.Close()
 	}()
+	if s.exit != nil {
+		defer s.exit.Close()
+		go func() {
+			<-ctx.Done()
+			_ = s.exit.Close()
+		}()
+		go s.serveExitDevice(ctx, conn)
+	}
 
 	buffer := make([]byte, 4096)
 	for {
@@ -231,13 +262,67 @@ func (s *Server) handleData(conn *net.UDPConn, remote *net.UDPAddr, packet []byt
 	if packet[0] == packetDataEnc {
 		xorData(source.xorKey, payload)
 	}
+	originalPayload := payload
 
-	target := s.routeTarget(payload)
-	if target == nil {
-		target = source
+	parsed, err := parseIPv4Packet(payload)
+	if err == nil {
+		if s.config.exit.enabled {
+			payload = parsed.packet
+		}
+		if s.config.exit.enabled && s.config.exit.strictSource && parsed.source != source.address {
+			return nil
+		}
+		if target, ok := s.outboundForAddress(parsed.destination); ok {
+			response := buildDataPacket(target.token, target.sessionID, payload, target.encrypt, target.xorKey)
+			_, err = conn.WriteToUDP(response, target.remote)
+			return err
+		}
+		if s.config.exit.enabled {
+			if s.exit == nil {
+				return errors.New("exit mode enabled without packet device")
+			}
+			_, err = s.exit.Write(payload)
+			return err
+		}
+	} else if s.config.exit.enabled {
+		return nil
 	}
-	response := buildDataPacket(target.token, target.sessionID, payload, target.encrypt, target.xorKey)
-	_, err := conn.WriteToUDP(response, target.remote)
+
+	response := buildDataPacket(source.token, source.sessionID, originalPayload, source.encrypt, source.xorKey)
+	_, err = conn.WriteToUDP(response, source.remote)
+	return err
+}
+
+func (s *Server) serveExitDevice(ctx context.Context, conn *net.UDPConn) {
+	buffer := make([]byte, MaxMTU)
+	for {
+		n, err := s.exit.Read(buffer)
+		if err != nil {
+			if ctx.Err() != nil || errors.Is(err, net.ErrClosed) || errors.Is(err, io.EOF) {
+				return
+			}
+			s.logger.Printf("read exit device: %v", err)
+			return
+		}
+		packet := make([]byte, n)
+		copy(packet, buffer[:n])
+		if err = s.handleExitPacket(conn, packet); err != nil {
+			s.logger.Printf("handle exit packet: %v", err)
+		}
+	}
+}
+
+func (s *Server) handleExitPacket(conn *net.UDPConn, payload []byte) error {
+	parsed, err := parseIPv4Packet(payload)
+	if err != nil {
+		return nil
+	}
+	target, ok := s.outboundForAddress(parsed.destination)
+	if !ok {
+		return nil
+	}
+	response := buildDataPacket(target.token, target.sessionID, parsed.packet, target.encrypt, target.xorKey)
+	_, err = conn.WriteToUDP(response, target.remote)
 	return err
 }
 
@@ -261,18 +346,14 @@ func (s *Server) sessionForPacket(remote *net.UDPAddr, packet []byte) (*outbound
 	return sessionToOutbound(current), true
 }
 
-func (s *Server) routeTarget(payload []byte) *outboundSession {
-	destination, ok := ipv4Destination(payload)
-	if !ok {
-		return nil
-	}
+func (s *Server) outboundForAddress(destination netip.Addr) (*outboundSession, bool) {
 	s.access.Lock()
 	defer s.access.Unlock()
 	current, ok := s.byAddress[destination]
 	if !ok {
-		return nil
+		return nil, false
 	}
-	return sessionToOutbound(current)
+	return sessionToOutbound(current), true
 }
 
 func sessionToOutbound(current *session) *outboundSession {
@@ -282,6 +363,7 @@ func sessionToOutbound(current *session) *outboundSession {
 		sessionID: current.key.sessionID,
 		encrypt:   current.encrypt,
 		xorKey:    current.user.xorKey,
+		address:   current.user.address,
 	}
 }
 
@@ -322,19 +404,6 @@ func newSessionIDs() ([2]byte, [4]byte, error) {
 		return [2]byte{}, [4]byte{}, fmt.Errorf("generate session id: %w", err)
 	}
 	return token, sessionID, nil
-}
-
-func ipv4Destination(payload []byte) (netip.Addr, bool) {
-	if len(payload) < 20 || payload[0]>>4 != 4 {
-		return netip.Addr{}, false
-	}
-	ihl := int(payload[0]&0x0f) * 4
-	if ihl < 20 || len(payload) < ihl {
-		return netip.Addr{}, false
-	}
-	var destination [4]byte
-	copy(destination[:], payload[16:20])
-	return netip.AddrFrom4(destination), true
 }
 
 func cloneUDPAddr(addr *net.UDPAddr) *net.UDPAddr {
